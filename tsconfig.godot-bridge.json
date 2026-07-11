@@ -1,0 +1,40 @@
+{
+  "extends": "./convex/tsconfig.json",
+  "compilerOptions": {
+    "incremental": false
+  },
+  "include": [],
+  "files": [
+    "convex/godot.ts",
+    "convex/godotBridgeAuth.ts",
+    "convex/godotBridgeContract.ts",
+    "convex/godotCapabilities.ts",
+    "convex/godotExchange.ts",
+    "convex/godotMapBoundary.ts",
+    "convex/godotMapPages.ts",
+    "convex/godotPresentation.ts",
+    "convex/godotReadModel.ts",
+    "convex/godotSpatial.ts",
+    "convex/godotTesting.ts",
+    "convex/godotTestingPolicy.ts",
+    "convex/godotViewerPolicy.ts",
+    "convex/http.ts",
+    "convex/xianxia/access.ts",
+    "convex/xianxia/actionIdempotency.ts",
+    "convex/xianxia/actions.ts",
+    "convex/xianxia/agent.ts",
+    "convex/xianxia/agentTickLease.ts",
+    "convex/xianxia/agentTickLeasePolicy.ts",
+    "convex/xianxia/agentTickScheduler.ts",
+    "convex/xianxia/durableContracts.ts",
+    "convex/xianxia/events.ts",
+    "convex/xianxia/groupScene.ts",
+    "convex/xianxia/growth.ts",
+    "convex/xianxia/memory.ts",
+    "convex/xianxia/movement.ts",
+    "convex/xianxia/qinglan.ts",
+    "convex/xianxia/qinglanProfiles.ts",
+    "convex/xianxia/quests.ts",
+    "convex/xianxia/schema.ts"
+  ]
+}

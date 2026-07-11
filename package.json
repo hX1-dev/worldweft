@@ -1,0 +1,46 @@
+{
+  "name": "worldweft",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "An open foundation for durable, evolving agent worlds in Godot.",
+  "engines": {
+    "node": ">=20 <25"
+  },
+  "scripts": {
+    "dev:backend": "convex dev --tail-logs",
+    "codegen": "convex codegen",
+    "test": "NODE_OPTIONS=--experimental-vm-modules jest --verbose",
+    "godot:check-contracts": "node godot-taixu-client/tools/check_godot_contracts.mjs",
+    "godot:check-live-ui": "node godot-taixu-client/tools/check_live_ui.mjs",
+    "godot:check-soak-policy": "node godot-taixu-client/tools/check_agent_soak_policy.mjs",
+    "godot:check-agent-soak": "node godot-taixu-client/tools/check_agent_soak.mjs",
+    "godot:check-agent-soak-long": "GODOT_SOAK_TICKS=24 GODOT_SOAK_DELAY_MS=500 GODOT_SOAK_CONTEXT_ACTORS=12 GODOT_SOAK_REQUEST_TIMEOUT_MS=60000 GODOT_SOAK_MAX_RUNTIME_MS=1200000 GODOT_SOAK_MAX_TOTAL_RESPONSE_BYTES=128000000 GODOT_SOAK_REQUIRE_MEMORY_DELTA=1 GODOT_SOAK_REQUIRE_RELATIONSHIP_DELTA=1 node godot-taixu-client/tools/check_agent_soak.mjs",
+    "godot:check-types": "tsc -p tsconfig.godot-bridge.json --pretty false",
+    "godot:check-lint": "eslint --no-eslintrc --config godot-taixu-client/.eslintrc.cjs convex/godot.ts convex/godotBridgeAuth.ts convex/godotBridgeContract.ts convex/godotCapabilities.ts convex/godotExchange.ts convex/godotMapBoundary.ts convex/godotMapPages.ts convex/godotPresentation.ts convex/godotReadModel.ts convex/godotSpatial.ts convex/godotTesting.ts convex/godotTestingPolicy.ts convex/godotViewerPolicy.ts convex/http.ts convex/xianxia/access.ts convex/xianxia/actionIdempotency.ts convex/xianxia/actions.ts convex/xianxia/agent.ts convex/xianxia/agentTickLease.ts convex/xianxia/agentTickLeasePolicy.ts convex/xianxia/agentTickScheduler.ts convex/xianxia/durableContracts.ts convex/xianxia/events.ts convex/xianxia/groupScene.ts convex/xianxia/growth.ts convex/xianxia/memory.ts convex/xianxia/movement.ts convex/xianxia/qinglan.ts convex/xianxia/qinglanProfiles.ts convex/xianxia/quests.ts convex/xianxia/schema.ts godot-taixu-client/tools/*.mjs",
+    "godot:check-static": "npm-run-all godot:check-types godot:check-lint",
+    "godot:check-source": "node godot-taixu-client/tools/check_source_boundary.mjs",
+    "godot:list-source": "node godot-taixu-client/tools/check_source_boundary.mjs --list",
+    "godot:check-release-source": "node godot-taixu-client/tools/check_source_boundary.mjs --require-tracked",
+    "godot:check-clean-snapshot": "node godot-taixu-client/tools/check_clean_snapshot.mjs",
+    "godot:check-production": "node godot-taixu-client/tools/check_production_readiness.mjs",
+    "godot:check-unit": "NODE_OPTIONS=--experimental-vm-modules jest convex/godotBridgeAuth.test.ts convex/godotBridgeContract.test.ts convex/godotCapabilities.test.ts convex/godotExchange.test.ts convex/godotMapBoundary.test.ts convex/godotPresentation.test.ts convex/godotSpatial.test.ts convex/godotTestingPolicy.test.ts convex/godotViewerPolicy.test.ts convex/xianxia/access.test.ts convex/xianxia/actionIdempotency.test.ts convex/xianxia/agentTickLeasePolicy.test.ts convex/xianxia/agentTickScheduler.test.ts convex/xianxia/durableContracts.test.ts convex/xianxia/memoryFanout.test.ts convex/xianxia/qinglanFangshiZones.test.ts convex/xianxia/qinglanNavigation.test.ts convex/xianxia/qinglanProfiles.test.ts",
+    "godot:check-core": "npm-run-all godot:check-source godot:check-static godot:check-soak-policy godot:check-unit godot:check-contracts"
+  },
+  "dependencies": {
+    "convex": "^1.41.0",
+    "replicate": "^0.18.0"
+  },
+  "devDependencies": {
+    "@types/jest": "^29.5.4",
+    "@types/node": "20.2.5",
+    "@typescript-eslint/eslint-plugin": "^6.4.1",
+    "@typescript-eslint/parser": "^6.4.1",
+    "eslint": "8.42.0",
+    "jest": "^29.7.0",
+    "npm-run-all": "^4.1.5",
+    "ts-node": "^10.9.1",
+    "ts-jest": "29.1.1",
+    "typescript": "5.1.3"
+  }
+}

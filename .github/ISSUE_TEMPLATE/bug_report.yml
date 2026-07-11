@@ -1,0 +1,38 @@
+name: Bug report
+description: Report a reproducible problem in Worldweft.
+title: "bug: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: "Do not include bridge tokens, .env files, or local Convex state."
+  - type: textarea
+    id: behavior
+    attributes:
+      label: What happened?
+      description: State the observed and expected behavior.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction
+      description: Include the smallest safe sequence of commands or actions.
+      placeholder: |
+        1. Run ...
+        2. Submit ...
+        3. Observe ...
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Node version, Godot version, OS, and whether a local Convex backend was used.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Sanitized logs
+      description: Remove secrets and personal data before pasting.
