@@ -1,0 +1,95 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="760" viewBox="0 0 1200 760" role="img" aria-labelledby="title desc">
+  <title id="title">Worldweft authority architecture</title>
+  <desc id="desc">Godot clients and language-model agents submit semantic intent through an authenticated bridge. Convex validates intent, applies rules, writes durable facts, and returns read models. Neither Godot nor an LLM can write durable world state directly.</desc>
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto" markerUnits="strokeWidth"><path d="M0 0 L10 5 L0 10 Z" fill="#d0d7de"/></marker>
+    <marker id="arrow-blue" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto" markerUnits="strokeWidth"><path d="M0 0 L10 5 L0 10 Z" fill="#58a6ff"/></marker>
+    <marker id="arrow-red" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto" markerUnits="strokeWidth"><path d="M0 0 L10 5 L0 10 Z" fill="#f85149"/></marker>
+    <style>
+      .canvas { fill:#0d1117; }
+      .panel { fill:#161b22; stroke:#30363d; stroke-width:2; }
+      .bridge { fill:#1b1a12; stroke:#d29922; stroke-width:3; }
+      .runtime { fill:#101b2d; stroke:#58a6ff; stroke-width:3; }
+      .step { fill:#0d1117; stroke:#8b949e; stroke-width:2; }
+      .store { fill:#13261c; stroke:#3fb950; stroke-width:3; }
+      .divider { stroke:#30363d; stroke-width:2; }
+      .kicker { fill:#8b949e; font:700 14px Arial,sans-serif; letter-spacing:2px; }
+      .title { fill:#f0f6fc; font:700 29px Arial,sans-serif; }
+      .heading { fill:#f0f6fc; font:700 20px Arial,sans-serif; }
+      .body { fill:#c9d1d9; font:16px Arial,sans-serif; }
+      .small { fill:#8b949e; font:14px Arial,sans-serif; }
+      .label { fill:#d0d7de; font:700 13px Arial,sans-serif; letter-spacing:1px; }
+      .command { fill:none; stroke:#d0d7de; stroke-width:3; stroke-linecap:square; stroke-linejoin:miter; marker-end:url(#arrow); }
+      .projection { fill:none; stroke:#58a6ff; stroke-width:3; stroke-linecap:square; stroke-linejoin:miter; marker-end:url(#arrow-blue); }
+      .blocked { fill:none; stroke:#f85149; stroke-width:3; stroke-dasharray:9 6; stroke-linecap:square; stroke-linejoin:miter; marker-end:url(#arrow-red); }
+    </style>
+  </defs>
+
+  <rect class="canvas" width="1200" height="760"/>
+  <text x="50" y="52" class="kicker">WORLDWEFT / AUTHORITY MODEL</text>
+  <text x="50" y="92" class="title">One durable world authority. Many embodied participants.</text>
+  <line x1="50" y1="120" x2="1150" y2="120" class="divider"/>
+
+  <rect x="50" y="178" width="260" height="188" class="panel"/>
+  <text x="72" y="212" class="kicker">CLIENT</text>
+  <text x="72" y="248" class="heading">Godot</text>
+  <text x="72" y="280" class="body">Input and interaction</text>
+  <text x="72" y="306" class="body">Space and collision</text>
+  <text x="72" y="332" class="body">UI and presentation</text>
+  <line x1="72" y1="344" x2="288" y2="344" class="divider"/>
+  <text x="72" y="354" class="small">No durable writes</text>
+
+  <rect x="50" y="470" width="260" height="150" class="panel"/>
+  <text x="72" y="504" class="kicker">PROPOSER</text>
+  <text x="72" y="540" class="heading">Agent / LLM</text>
+  <text x="72" y="572" class="body">Intent and display polish</text>
+  <line x1="72" y1="586" x2="288" y2="586" class="divider"/>
+  <text x="72" y="606" class="small">No rule or fact authority</text>
+
+  <rect x="425" y="272" width="285" height="238" class="bridge"/>
+  <text x="449" y="308" class="kicker">BOUNDARY API</text>
+  <text x="449" y="344" class="heading">Authenticated Bridge</text>
+  <line x1="449" y1="360" x2="686" y2="360" class="divider"/>
+  <text x="449" y="394" class="label">ACCEPTS</text>
+  <text x="449" y="420" class="body">semantic action, tick, intent</text>
+  <text x="449" y="462" class="label">RETURNS</text>
+  <text x="449" y="488" class="body">read model and trace</text>
+
+  <rect x="830" y="154" width="320" height="442" class="runtime"/>
+  <text x="854" y="190" class="kicker">AUTHORITATIVE BACKEND</text>
+  <text x="854" y="226" class="heading">Convex World Runtime</text>
+  <line x1="854" y1="242" x2="1126" y2="242" class="divider"/>
+  <rect x="854" y="270" width="272" height="72" class="step"/>
+  <text x="874" y="298" class="label">01  VALIDATE</text>
+  <text x="874" y="322" class="small">identity, presence, capability, risk</text>
+  <rect x="854" y="370" width="272" height="72" class="step"/>
+  <text x="874" y="398" class="label">02  ADJUDICATE</text>
+  <text x="874" y="422" class="small">canonical rules and idempotency</text>
+  <rect x="854" y="470" width="272" height="102" class="store"/>
+  <text x="874" y="498" class="label">03  PERSIST</text>
+  <text x="874" y="524" class="small">actionRecords and worldEvents</text>
+  <text x="874" y="548" class="small">relationships, memories, projections</text>
+
+  <path d="M310 300 H425" class="command"/>
+  <text x="328" y="282" class="small">semantic action</text>
+  <path d="M310 540 H378 V452 H425" class="command"/>
+  <text x="323" y="522" class="small">bounded intent</text>
+  <path d="M710 330 H830" class="command"/>
+  <text x="726" y="312" class="small">authenticated command</text>
+  <path d="M990 342 V370" class="command"/>
+  <path d="M990 442 V470" class="command"/>
+
+  <path d="M830 538 H760 V488 H710" class="projection"/>
+  <text x="713" y="470" class="small">projection and trace</text>
+  <path d="M425 350 H310" class="projection"/>
+  <text x="322" y="378" class="small">state, events, bubbles</text>
+
+  <path d="M310 592 H382 V662 H990 V596" class="blocked"/>
+  <text x="572" y="688" class="small" fill="#f85149">BLOCKED: NO DIRECT DURABLE WRITE</text>
+
+  <rect x="50" y="712" width="1100" height="28" class="panel"/>
+  <text x="72" y="732" class="small">White: semantic command</text>
+  <text x="328" y="732" class="small" fill="#58a6ff">Blue: read projection</text>
+  <text x="590" y="732" class="small" fill="#f85149">Red: forbidden authority path</text>
+  <text x="902" y="732" class="small">Every durable outcome is auditable.</text>
+</svg>
