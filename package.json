@@ -29,7 +29,7 @@
   },
   "dependencies": {
     "convex": "^1.41.0",
-    "replicate": "^0.18.0"
+    "replicate": "^1.4.0"
   },
   "devDependencies": {
     "@types/jest": "^29.5.4",
