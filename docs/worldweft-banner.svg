@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="320" viewBox="0 0 1200 320" role="img" aria-labelledby="title desc">
+  <title id="title">Worldweft</title>
+  <desc id="desc">Worldweft is an open runtime for autonomous agent worlds.</desc>
+  <style>
+    .canvas { fill:#0d1117; }
+    .grid { stroke:#21262d; stroke-width:1; }
+    .frame { fill:#161b22; stroke:#30363d; stroke-width:2; }
+    .blue { fill:none; stroke:#58a6ff; stroke-width:10; stroke-linecap:square; stroke-linejoin:miter; }
+    .green { fill:none; stroke:#3fb950; stroke-width:10; stroke-linecap:square; stroke-linejoin:miter; }
+    .kicker { fill:#8b949e; font-family:Arial,Helvetica,sans-serif; font-size:14px; font-weight:700; letter-spacing:3px; }
+    .name { fill:#f0f6fc; font-family:Arial,Helvetica,sans-serif; font-size:54px; font-weight:700; letter-spacing:2px; }
+    .tagline { fill:#c9d1d9; font-family:Arial,Helvetica,sans-serif; font-size:22px; }
+    .rule { fill:#8b949e; font-family:Arial,Helvetica,sans-serif; font-size:16px; }
+    .pill { fill:#161b22; stroke:#30363d; stroke-width:1; }
+    .pillText { fill:#c9d1d9; font-family:Arial,Helvetica,sans-serif; font-size:12px; font-weight:700; letter-spacing:1px; }
+  </style>
+
+  <rect class="canvas" width="1200" height="320"/>
+  <path class="grid" d="M0 64 H1200 M0 128 H1200 M0 192 H1200 M0 256 H1200 M64 0 V320 M128 0 V320 M192 0 V320 M256 0 V320 M320 0 V320 M384 0 V320 M448 0 V320 M512 0 V320 M576 0 V320 M640 0 V320 M704 0 V320 M768 0 V320 M832 0 V320 M896 0 V320 M960 0 V320 M1024 0 V320 M1088 0 V320 M1152 0 V320"/>
+
+  <rect x="52" y="52" width="216" height="216" class="frame"/>
+  <path class="blue" d="M88 92 V224 H126 V126 H164 V224 H202 V92"/>
+  <path class="green" d="M88 224 H107 V126 H145 V224 H183 V126 H202"/>
+
+  <text x="322" y="70" class="kicker">OPEN RUNTIME FOR AUTONOMOUS AGENT WORLDS</text>
+  <text x="318" y="137" class="name">WORLDWEFT</text>
+  <text x="322" y="181" class="tagline">Autonomous agents. Authoritative rules. Durable worlds.</text>
+  <text x="322" y="219" class="rule">Agents propose. Convex decides. Godot embodies. Every outcome remains auditable.</text>
+
+  <rect x="322" y="246" width="92" height="30" class="pill"/>
+  <text x="344" y="266" class="pillText">GODOT</text>
+  <rect x="426" y="246" width="96" height="30" class="pill"/>
+  <text x="445" y="266" class="pillText">CONVEX</text>
+  <rect x="534" y="246" width="174" height="30" class="pill"/>
+  <text x="552" y="266" class="pillText">SEMANTIC ACTIONS</text>
+  <rect x="720" y="246" width="138" height="30" class="pill"/>
+  <text x="739" y="266" class="pillText">DURABLE TRACE</text>
+</svg>
