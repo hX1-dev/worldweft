@@ -71,25 +71,20 @@
   <text x="874" y="548" class="small">relationships, memories, projections</text>
 
   <path d="M310 300 H425" class="command"/>
-  <text x="328" y="282" class="small">semantic action</text>
-  <path d="M310 540 H378 V452 H425" class="command"/>
-  <text x="323" y="522" class="small">bounded intent</text>
+  <path d="M310 540 H378 V438 H425" class="command"/>
   <path d="M710 330 H830" class="command"/>
-  <text x="726" y="312" class="small">authenticated command</text>
   <path d="M990 342 V370" class="command"/>
   <path d="M990 442 V470" class="command"/>
 
   <path d="M830 538 H760 V488 H710" class="projection"/>
-  <text x="713" y="470" class="small">projection and trace</text>
   <path d="M425 350 H310" class="projection"/>
-  <text x="322" y="378" class="small">state, events, bubbles</text>
 
   <path d="M310 592 H382 V662 H990 V596" class="blocked"/>
   <text x="572" y="688" class="small" fill="#f85149">BLOCKED: NO DIRECT DURABLE WRITE</text>
 
   <rect x="50" y="712" width="1100" height="28" class="panel"/>
-  <text x="72" y="732" class="small">White: semantic command</text>
-  <text x="328" y="732" class="small" fill="#58a6ff">Blue: read projection</text>
-  <text x="590" y="732" class="small" fill="#f85149">Red: forbidden authority path</text>
-  <text x="902" y="732" class="small">Every durable outcome is auditable.</text>
+  <text x="72" y="732" class="small">White: proposed intent and command</text>
+  <text x="370" y="732" class="small" fill="#58a6ff">Blue: authoritative read model</text>
+  <text x="676" y="732" class="small" fill="#f85149">Red: rejected direct write</text>
+  <text x="948" y="732" class="small">Every outcome is auditable.</text>
 </svg>
