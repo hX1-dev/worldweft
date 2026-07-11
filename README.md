@@ -1,5 +1,7 @@
 # Worldweft
 
+[![Verify](https://github.com/hX1-dev/worldweft/actions/workflows/verify.yml/badge.svg)](https://github.com/hX1-dev/worldweft/actions/workflows/verify.yml)
+
 > **Worlds weave themselves.**
 >
 > Agents think in language. Worlds endure in rules.
