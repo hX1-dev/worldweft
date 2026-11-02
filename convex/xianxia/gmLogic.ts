@@ -33,6 +33,20 @@ const OUTCOMES: StealOutcome[] = [
   'failed_detected',
 ];
 
+export function shouldInvokeWeakGmProvider(input: {
+  providerPolicy?: 'disabled';
+  actionType: string;
+  targetActorId?: string;
+  locationId?: string;
+  itemId?: string;
+}) {
+  return (
+    input.providerPolicy !== 'disabled' &&
+    input.actionType === 'steal' &&
+    Boolean(input.targetActorId && input.locationId && input.itemId)
+  );
+}
+
 // GM prompt（§19.2：你是裁决辅助器，不是故事作者）。
 export function buildGmMessages(ctx: GmContext): { system: string; user: string } {
   const system = [
@@ -94,7 +108,10 @@ function extractJson(content: string): Record<string, unknown> | null {
     const end = chunk.lastIndexOf('}');
     if (start >= 0 && end > start) {
       try {
-        return JSON.parse(chunk.slice(start, end + 1));
+        const parsed: unknown = JSON.parse(chunk.slice(start, end + 1));
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+          return parsed as Record<string, unknown>;
+        }
       } catch {
         // 试下一个候选
       }

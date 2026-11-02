@@ -5,7 +5,54 @@
 // 第一版只做两类最可由档案快照核实的：collect_item（持有某物）、explore_location（到某地）。
 // 依据：xianxia-world-concept-pack/docs/taixu-stage-2-social-system.md §12。
 
+import { isActorIncapacitated } from './lifeStateLogic';
+
 export type RequestType = 'collect_item' | 'explore_location';
+export type RequestStatus =
+  | 'offered'
+  | 'accepted'
+  | 'ready_to_turn_in'
+  | 'completed'
+  | 'declined'
+  | 'expired';
+
+export const ACTIVE_REQUEST_STATUSES: RequestStatus[] = [
+  'offered',
+  'accepted',
+  'ready_to_turn_in',
+];
+
+export const REQUEST_INITIAL_REVISION = 1;
+export const REQUEST_REOFFER_COOLDOWN_GAME_HOURS = 24;
+
+export function requestRevision(request: { revision?: number }): number {
+  return Number.isInteger(request.revision) && (request.revision ?? 0) >= REQUEST_INITIAL_REVISION
+    ? request.revision!
+    : REQUEST_INITIAL_REVISION;
+}
+
+export function nextRequestRevision(request: { revision?: number }): number {
+  return requestRevision(request) + 1;
+}
+
+export function requestRevisionMatches(
+  request: { revision?: number },
+  expectedRevision: unknown,
+): boolean {
+  return Number.isInteger(expectedRevision) && expectedRevision === requestRevision(request);
+}
+
+export function requestReofferAllowed(
+  nowGameHour: number,
+  priorRequests: Array<{ terminalAtGameHour?: number }>,
+): boolean {
+  if (!Number.isFinite(nowGameHour)) return false;
+  return priorRequests.every(
+    (request) =>
+      request.terminalAtGameHour === undefined ||
+      nowGameHour - request.terminalAtGameHour >= REQUEST_REOFFER_COOLDOWN_GAME_HOURS,
+  );
+}
 
 export type Requirements = {
   itemId?: string;
@@ -17,6 +64,23 @@ export type AssigneeSnapshot = {
   inventory?: { itemId: string; qty: number }[];
   currentLocationId?: string;
 };
+
+export function isQuestPublisherEligible(profile: { role: string; health: number }) {
+  return profile.role === 'elder' && !isActorIncapacitated(profile.health);
+}
+
+export function isQuestRecipientEligible(profile: { role: string; health: number }) {
+  return profile.role.endsWith('disciple') && !isActorIncapacitated(profile.health);
+}
+
+export function canSettleQuestForLifeState(
+  assignee: { health: number },
+  issuer?: { health: number } | null,
+) {
+  return (
+    !isActorIncapacitated(assignee.health) && (!issuer || !isActorIncapacitated(issuer.health))
+  );
+}
 
 function inventoryHas(inv: AssigneeSnapshot['inventory'], itemId: string, qty: number): boolean {
   const e = (inv ?? []).find((i) => i.itemId === itemId);
@@ -46,7 +110,26 @@ export function requestExpiresAtHour(nowGameHour: number): number {
 
 // 是否已过期。expiresAt 与 nowGameHour 同为「游戏小时」。
 export function isExpired(req: { expiresAt: number; status: string }, nowGameHour: number): boolean {
-  return req.status === 'offered' && req.expiresAt <= nowGameHour;
+  return ACTIVE_REQUEST_STATUSES.includes(req.status as RequestStatus) && req.expiresAt <= nowGameHour;
+}
+
+export function canTransitionRequest(from: string, to: RequestStatus): boolean {
+  const transitions: Record<string, RequestStatus[]> = {
+    offered: ['accepted', 'declined', 'expired'],
+    accepted: ['ready_to_turn_in', 'expired'],
+    ready_to_turn_in: ['accepted', 'completed', 'expired'],
+  };
+  return transitions[from]?.includes(to) ?? false;
+}
+
+export function requestRequirementReady(
+  type: RequestType,
+  requirements: Requirements,
+  assignee: AssigneeSnapshot,
+  fulfilledAt?: number,
+): boolean {
+  if (type === 'explore_location' && fulfilledAt !== undefined) return true;
+  return isRequirementMet(type, requirements, assignee);
 }
 
 // W4b-D：在合格弟子中确定性地轮换发派，并让任务类型有变化——不再永远同一人采灵草。

@@ -1,0 +1,89 @@
+{
+  "mapId": "qinglan_valley_gate",
+  "locations": [
+    {
+      "id": "valley_west_entry",
+      "name": "溪谷西口",
+      "bounds": {
+        "x": 0,
+        "y": 15,
+        "width": 8,
+        "height": 7
+      },
+      "entryPoint": {
+        "x": 2,
+        "y": 18
+      }
+    },
+    {
+      "id": "rest_clearing",
+      "name": "松风歇脚地",
+      "bounds": {
+        "x": 6,
+        "y": 7,
+        "width": 11,
+        "height": 7
+      },
+      "entryPoint": {
+        "x": 11,
+        "y": 10
+      }
+    },
+    {
+      "id": "creek_bridge",
+      "name": "听泉木桥",
+      "bounds": {
+        "x": 20,
+        "y": 15,
+        "width": 9,
+        "height": 7
+      },
+      "entryPoint": {
+        "x": 24,
+        "y": 18
+      }
+    },
+    {
+      "id": "herb_meadow",
+      "name": "凝露药草坡",
+      "bounds": {
+        "x": 11,
+        "y": 24,
+        "width": 11,
+        "height": 8
+      },
+      "entryPoint": {
+        "x": 16,
+        "y": 28
+      }
+    },
+    {
+      "id": "sealed_shrine",
+      "name": "封印古祠",
+      "bounds": {
+        "x": 33,
+        "y": 6,
+        "width": 11,
+        "height": 9
+      },
+      "entryPoint": {
+        "x": 38,
+        "y": 12
+      }
+    },
+    {
+      "id": "mist_gate",
+      "name": "溪谷雾门",
+      "bounds": {
+        "x": 42,
+        "y": 13,
+        "width": 6,
+        "height": 11
+      },
+      "entryPoint": {
+        "x": 46,
+        "y": 18
+      }
+    }
+  ]
+}

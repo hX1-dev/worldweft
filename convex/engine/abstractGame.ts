@@ -16,7 +16,7 @@ export abstract class AbstractGame {
   abstract tick(now: number): void;
 
   // Optional callback at the beginning of each step.
-  beginStep(now: number) {}
+  beginStep(_now: number) {}
   abstract saveStep(ctx: ActionCtx, engineUpdate: EngineUpdate): Promise<void>;
 
   async runStep(ctx: ActionCtx, now: number) {
@@ -57,9 +57,11 @@ export abstract class AbstractGame {
         try {
           const value = this.handleInput(currentTs, input.name, input.args);
           returnValue = { kind: 'ok' as const, value };
-        } catch (e: any) {
-          console.error(`Input ${input._id} failed: ${e.message}`);
-          returnValue = { kind: 'error' as const, message: e.message };
+        } catch (error: unknown) {
+          const errorMessage =
+            error instanceof Error ? error.message : String(error);
+          console.error(`Input ${input._id} failed: ${errorMessage}`);
+          returnValue = { kind: 'error' as const, message: errorMessage };
         }
         completedInputs.push({ inputId: input._id, returnValue });
       }
@@ -134,9 +136,12 @@ export async function engineInsertInput(
   ctx: MutationCtx,
   engineId: Id<'engines'>,
   name: string,
-  args: any,
+  args: unknown,
 ): Promise<Id<'inputs'>> {
-  const now = Date.now();
+  const engine = await ctx.db.get(engineId);
+  if (!engine) {
+    throw new Error(`No engine found with id ${engineId}`);
+  }
   const prevInput = await ctx.db
     .query('inputs')
     .withIndex('byInputNumber', (q) => q.eq('engineId', engineId))
@@ -148,7 +153,7 @@ export async function engineInsertInput(
     number,
     name,
     args,
-    received: now,
+    received: Date.now(),
   });
   return inputId;
 }

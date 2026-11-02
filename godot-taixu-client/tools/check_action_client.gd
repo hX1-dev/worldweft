@@ -54,6 +54,42 @@ func _run() -> void:
 	_assert(bridge.payloads.size() == 2, "new command submits after pending action clears")
 	_assert(str(bridge.payloads[1].get("clientActionId", "")) != first_id, "new command gets a new clientActionId")
 
+	bridge.pending = false
+	var use_item_capability := {
+		"type": "use_item",
+		"category": "self",
+		"enabled": true,
+		"params": { "itemId": "ignored_fallback", "unexpected": "must_not_submit" },
+		"options": [{
+			"itemId": "healing_pill",
+			"params": { "itemId": "healing_pill", "previewOnly": true },
+		}],
+	}
+	client.submit_capability(use_item_capability, resident, location, "world_contract", Vector2(1, 2), 5.0)
+	_assert(bridge.payloads.size() == 3, "self healing item action submits")
+	var use_item_payload: Dictionary = bridge.payloads[2]
+	_assert(str(use_item_payload.get("type", "")) == "use_item", "self action preserves use_item type")
+	_assert(str(use_item_payload.get("intent", "")) == "服用疗伤丹恢复气血", "self action uses a healing default intent")
+	_assert(not use_item_payload.has("targetActorId"), "self action never submits a selected resident")
+	_assert(not use_item_payload.has("locationId"), "self action never submits a selected location")
+	_assert(not use_item_payload.has("interactionRangeTiles"), "self action does not submit an interaction range")
+	var use_item_params: Dictionary = use_item_payload.get("params", {})
+	_assert(use_item_params.size() == 1, "self action submits exactly one item parameter")
+	_assert(str(use_item_params.get("itemId", "")) == "healing_pill", "self action submits the selected healing item")
+
+	bridge.pending = false
+	var payload_count_before_missing_item: int = bridge.payloads.size()
+	client.submit_capability(
+		{ "type": "use_item", "category": "self", "enabled": true, "params": {} },
+		resident,
+		location,
+		"world_contract",
+		Vector2(1, 2),
+		5.0
+	)
+	_assert(bridge.payloads.size() == payload_count_before_missing_item, "missing self itemId is rejected locally")
+	_assert(str(rejected[-1]).contains("itemId"), "missing self itemId rejection is explicit")
+
 	var retry_bridge = ConvexBridgeScript.new()
 	var request := { "label": "action", "attempt": 0 }
 	_assert(retry_bridge._should_retry_action_request(request, HTTPRequest.RESULT_TIMEOUT, 0), "transport timeout retries action")
@@ -99,6 +135,104 @@ func _run() -> void:
 		retry_bridge._validate_success_payload("action", { "ok": true }) == "Action response is missing lifecycle anchors.",
 		"drifted action response shape is rejected"
 	)
+	var movement_goal := {
+		"commandId": "move_contract",
+		"actionRecordId": "ar_contract",
+		"revision": 1,
+		"actorId": "qinglan_valley_gate:resting_disciple",
+		"mapId": "qinglan_valley_gate",
+		"intent": "visit bridge",
+		"decisionSource": "llm",
+		"requestedTarget": { "kind": "location", "locationId": "creek_bridge" },
+		"acceptedTile": { "x": 24, "y": 18 },
+		"issuedAt": 1000,
+		"expiresAt": 61000,
+	}
+	_assert(
+		retry_bridge._validate_success_payload("movementGoals", {
+			"ok": true,
+			"movementProtocolVersion": 1,
+			"mapId": "qinglan_valley_gate",
+			"goals": [movement_goal],
+			"cancellations": [{
+				"commandId": "move_cancelled",
+				"revision": 2,
+				"actorId": "qinglan_valley_gate:resting_disciple",
+				"mapId": "qinglan_valley_gate",
+				"reasonCode": "actor_incapacitated",
+				"cancelledAt": 62000,
+			}],
+		}) == "",
+		"valid movement goal and cancellation response is accepted"
+	)
+	_assert(
+		retry_bridge._validate_success_payload("movementGoals", {
+			"ok": true,
+			"movementProtocolVersion": 1,
+			"mapId": "qinglan_valley_gate",
+			"goals": [],
+		}) == "",
+		"legacy movement goal response may omit cancellations"
+	)
+	_assert(
+		retry_bridge._validate_success_payload("movementGoals", {
+			"ok": true,
+			"movementProtocolVersion": 1,
+			"mapId": "qinglan_valley_gate",
+			"goals": [],
+			"cancellations": {},
+		}) == "Movement goals response cancellations must be an array.",
+		"movement cancellation collection rejects a non-array value"
+	)
+	_assert(
+		retry_bridge._validate_success_payload("movementGoals", {
+			"ok": true,
+			"movementProtocolVersion": 1,
+			"mapId": "qinglan_valley_gate",
+			"goals": [],
+			"cancellations": [{"commandId": "move_cancelled"}],
+		}) == "Movement cancellation is missing identity or reason fields.",
+		"incomplete movement cancellation is rejected"
+	)
+	_assert(
+		retry_bridge._validate_success_payload("movementGoals", {
+			"ok": true,
+			"movementProtocolVersion": 1,
+			"mapId": "qinglan_valley_gate",
+			"goals": [{ "commandId": "broken" }],
+		}) == "Movement goal is missing identity fields.",
+		"incomplete movement goal response is rejected"
+	)
+	_assert(
+		retry_bridge._validate_success_payload("movementReport", {
+			"ok": true,
+			"movementProtocolVersion": 1,
+			"commandId": "move_contract",
+			"revision": 1,
+			"status": "moving",
+		}) == "",
+		"valid movement report acknowledgement is accepted"
+	)
+	_assert(
+		retry_bridge._should_retry_action_request({ "label": "movementReport", "attempt": 0 }, HTTPRequest.RESULT_TIMEOUT, 0),
+		"movement report retries once after a transport failure"
+	)
+	_assert(
+		not retry_bridge._should_retry_action_request({ "label": "movementGoals", "attempt": 0 }, HTTPRequest.RESULT_TIMEOUT, 0),
+		"movement goal reads are deduplicated instead of write-retried"
+	)
+	retry_bridge._request_queue.clear()
+	retry_bridge._active_label = "contract_test_busy"
+	retry_bridge.post_movement_report({ "commandId": "move_contract", "revision": 1, "status": "moving", "positionTiles": { "x": 1, "y": 1 } })
+	retry_bridge.post_movement_report({ "commandId": "move_contract", "revision": 1, "status": "moving", "positionTiles": { "x": 2, "y": 1 } })
+	_assert(retry_bridge._request_queue.size() == 1, "queued movement samples are coalesced per command")
+	_assert(float(retry_bridge._request_queue[0].get("payload", {}).get("positionTiles", {}).get("x", 0)) == 2.0, "coalesced report keeps the newest position")
+	retry_bridge.post_movement_report({ "commandId": "move_contract", "revision": 2, "status": "moving", "positionTiles": { "x": 2, "y": 2 } })
+	_assert(retry_bridge._request_queue.size() == 2, "movement sample coalescing does not erase a different revision")
+	retry_bridge.post_movement_report({ "commandId": "move_contract", "revision": 1, "status": "arrived", "positionTiles": { "x": 3, "y": 1 } })
+	_assert(retry_bridge._request_queue.size() == 3, "terminal movement report is never coalesced away")
+	retry_bridge._request_queue.clear()
+	retry_bridge._active_label = ""
 	var complete_page := {
 		"limit": 20,
 		"returned": 1,

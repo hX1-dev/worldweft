@@ -22,7 +22,10 @@ export const aiTownTables = {
     engineId: v.id('engines'),
     lastViewed: v.number(),
     status: v.union(v.literal('running'), v.literal('stoppedByDeveloper'), v.literal('inactive')),
-  }).index('worldId', ['worldId']),
+  })
+    .index('worldId', ['worldId'])
+    .index('byEngine', ['engineId'])
+    .index('byDefault', ['isDefault']),
 
   // This table contains the map data for a given world. Since it's a bit larger than the player
   // state and infrequently changes, we store it in a separate table.

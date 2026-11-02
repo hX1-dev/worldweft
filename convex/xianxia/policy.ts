@@ -10,23 +10,38 @@
 // 弟子全套：第一阶段实建的 8 动作 + 突破。自由 Agent 也用这套。
 const DISCIPLE_KIT = [
   'cultivate',
+  'gather',
+  'rest',
   'talk',
+  'invite_social',
+  'respond_social_invitation',
+  'group_talk',
+  'group_decide',
+  'negotiate',
   'trade',
   'gift',
   'explore',
+  'inspect',
   'request_teaching',
+  'accept_request',
+  'decline_request',
+  'turn_in_request',
   'spar',
+  'attack',
+  'flee',
+  'loot',
   'steal',
   'breakthrough',
+  'use_item',
 ];
 
 // role → 可「发起」的动作白名单（被动承受的动作如被求教/被赠礼不在此列）。
 // 固定 NPC 主要是世界功能角色：掌柜管交易、守卫管秩序、执事管赏罚、长老受求教。
 export const ROLE_ACTIONS: Record<string, string[]> = {
-  elder: ['cultivate', 'talk', 'gift', 'breakthrough'],
-  steward: ['cultivate', 'talk', 'gift'],
-  guard: ['cultivate', 'talk'],
-  merchant: ['talk', 'trade', 'gift'],
+  elder: ['cultivate', 'rest', 'talk', 'invite_social', 'respond_social_invitation', 'group_talk', 'group_decide', 'negotiate', 'gift', 'inspect', 'breakthrough', 'flee', 'use_item'],
+  steward: ['cultivate', 'rest', 'talk', 'invite_social', 'respond_social_invitation', 'group_talk', 'group_decide', 'negotiate', 'gift', 'inspect', 'flee', 'use_item'],
+  guard: ['cultivate', 'rest', 'talk', 'invite_social', 'respond_social_invitation', 'group_talk', 'group_decide', 'inspect', 'attack', 'flee', 'use_item'],
+  merchant: ['rest', 'talk', 'invite_social', 'respond_social_invitation', 'group_talk', 'group_decide', 'negotiate', 'trade', 'gift', 'inspect', 'flee', 'use_item'],
   outer_disciple: DISCIPLE_KIT,
   inner_disciple: DISCIPLE_KIT,
   sword_disciple: DISCIPLE_KIT,

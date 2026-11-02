@@ -57,6 +57,22 @@ export function itemDef(itemId: string): ItemDef | undefined {
   return ITEM_CATALOG[itemId];
 }
 
+// 自疗规则只信目录中的治疗类丹药；客户端不能自行声明恢复量。
+export function healingAmount(itemId: string): number | null {
+  const item = itemDef(itemId);
+  if (
+    !item ||
+    item.kind !== 'pill' ||
+    item.effect !== 'heal' ||
+    typeof item.value !== 'number' ||
+    !Number.isFinite(item.value) ||
+    item.value <= 0
+  ) {
+    return null;
+  }
+  return item.value;
+}
+
 // 显示名（未知物回退到 id，绝不抛错——历史库里可能有目录外的裸 id）。
 export function itemName(itemId: string): string {
   return ITEM_CATALOG[itemId]?.name ?? itemId;

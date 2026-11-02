@@ -1,5 +1,6 @@
 import { ConvexError, v } from 'convex/values';
 import { internalMutation, mutation, query } from './_generated/server';
+import type { Doc } from './_generated/dataModel';
 import { characters } from '../data/characters';
 import { insertInput } from './aiTown/insertInput';
 import {
@@ -11,6 +12,12 @@ import {
 import { playerId } from './aiTown/ids';
 import { kickEngine, startEngine, stopEngine } from './aiTown/main';
 import { engineInsertInput } from './engine/abstractGame';
+import {
+  deadWorldAction,
+  heartbeatWorldAction,
+  inactiveWorldAction,
+  orphanedWorldAction,
+} from './worldMaintenanceLogic';
 
 export const defaultWorldStatus = query({
   handler: async (ctx) => {
@@ -34,6 +41,10 @@ export const heartbeatWorld = mutation({
     if (!worldStatus) {
       throw new Error(`Invalid world ID: ${args.worldId}`);
     }
+    const engine = await ctx.db.get(worldStatus.engineId);
+    if (!engine) {
+      throw new Error(`Invalid engine ID: ${worldStatus.engineId}`);
+    }
     const now = Date.now();
 
     // Skip the update (and then potentially make the transaction readonly)
@@ -44,13 +55,21 @@ export const heartbeatWorld = mutation({
       });
     }
 
-    // Restart inactive worlds, but leave worlds explicitly stopped by the developer alone.
-    if (worldStatus.status === 'stoppedByDeveloper') {
-      console.debug(`World ${worldStatus._id} is stopped by developer, not restarting.`);
+    const action = heartbeatWorldAction({
+      status: worldStatus.status,
+      engineRunning: engine.running,
+    });
+    if (action === 'none') {
+      if (worldStatus.status === 'stoppedByDeveloper') {
+        console.debug(`World ${worldStatus._id} is stopped by developer, not restarting.`);
+      }
+      return;
     }
-    if (worldStatus.status === 'inactive') {
-      console.log(`Restarting inactive world ${worldStatus._id}...`);
+    console.log(`Restarting inactive world ${worldStatus._id}...`);
+    if (worldStatus.status !== 'running') {
       await ctx.db.patch(worldStatus._id, { status: 'running' });
+    }
+    if (action === 'start') {
       await startEngine(ctx, worldStatus.worldId);
     }
   },
@@ -61,12 +80,32 @@ export const stopInactiveWorlds = internalMutation({
     const cutoff = Date.now() - IDLE_WORLD_TIMEOUT;
     const worlds = await ctx.db.query('worldStatus').collect();
     for (const worldStatus of worlds) {
-      if (cutoff < worldStatus.lastViewed || worldStatus.status !== 'running') {
+      const engine = await ctx.db.get(worldStatus.engineId);
+      if (!engine) {
+        throw new Error(`Invalid engine ID: ${worldStatus.engineId}`);
+      }
+      if (
+        await quarantineOrphanedWorld(
+          ctx,
+          worldStatus,
+          engine,
+        )
+      ) {
         continue;
       }
-      console.log(`Stopping inactive world ${worldStatus._id}`);
-      await ctx.db.patch(worldStatus._id, { status: 'inactive' });
-      await stopEngine(ctx, worldStatus.worldId);
+      const action = inactiveWorldAction({
+        status: worldStatus.status,
+        engineRunning: engine.running,
+        lastViewed: worldStatus.lastViewed,
+        cutoff,
+      });
+      if (action !== 'none') {
+        console.log(`Stopping inactive world ${worldStatus._id}`);
+        await ctx.db.patch(worldStatus._id, { status: 'inactive' });
+        if (action === 'stop') {
+          await stopEngine(ctx, worldStatus.worldId);
+        }
+      }
     }
   },
 });
@@ -79,14 +118,29 @@ export const restartDeadWorlds = internalMutation({
     const engineTimeout = now - ENGINE_ACTION_DURATION * 2;
     const worlds = await ctx.db.query('worldStatus').collect();
     for (const worldStatus of worlds) {
-      if (worldStatus.status !== 'running') {
-        continue;
-      }
       const engine = await ctx.db.get(worldStatus.engineId);
       if (!engine) {
         throw new Error(`Invalid engine ID: ${worldStatus.engineId}`);
       }
-      if (engine.currentTime && engine.currentTime < engineTimeout) {
+      if (
+        await quarantineOrphanedWorld(
+          ctx,
+          worldStatus,
+          engine,
+        )
+      ) {
+        continue;
+      }
+      const action = deadWorldAction({
+        status: worldStatus.status,
+        engineRunning: engine.running,
+        engineCurrentTime: engine.currentTime,
+        engineTimeout,
+      });
+      if (action === 'start') {
+        console.warn(`Starting stopped engine ${engine._id} for running world...`);
+        await startEngine(ctx, worldStatus.worldId);
+      } else if (action === 'kick') {
         console.warn(`Restarting dead engine ${engine._id}...`);
         await kickEngine(ctx, worldStatus.worldId);
       }
@@ -94,11 +148,45 @@ export const restartDeadWorlds = internalMutation({
   },
 });
 
+async function quarantineOrphanedWorld(
+  ctx: Parameters<typeof stopEngine>[0],
+  worldStatus: Doc<'worldStatus'>,
+  engine: Doc<'engines'>,
+) {
+  const world = await ctx.db.get(worldStatus.worldId);
+  const action = orphanedWorldAction({
+    worldExists: Boolean(world),
+    isDefault: worldStatus.isDefault,
+    engineRunning: engine.running,
+    status: worldStatus.status,
+  });
+  if (action === 'none') {
+    return false;
+  }
+  if (action === 'reject_default') {
+    throw new Error(
+      `Default world ${worldStatus.worldId} is missing`,
+    );
+  }
+  console.warn(
+    `Quarantining orphaned non-default world ${worldStatus.worldId}...`,
+  );
+  if (action === 'stop_and_mark_inactive') {
+    await stopEngine(ctx, worldStatus.worldId);
+  }
+  if (worldStatus.status !== 'inactive') {
+    await ctx.db.patch(worldStatus._id, {
+      status: 'inactive',
+    });
+  }
+  return true;
+}
+
 export const userStatus = query({
   args: {
     worldId: v.id('worlds'),
   },
-  handler: async (ctx, args) => {
+  handler: async (_ctx, _args) => {
     // const identity = await ctx.auth.getUserIdentity();
     // if (!identity) {
     //   return null;

@@ -1,4 +1,4 @@
-import { evaluateRefusal, type TargetView } from './refusalLogic';
+import { evaluateRefusal, refusalSemanticFor, type TargetView } from './refusalLogic';
 
 // Stage 2 · M3 拒绝系统纯逻辑单测：黑名单/交易怀疑/敏感物品门槛/边界/放行。
 // 依据：xianxia-world-concept-pack/docs/taixu-stage-2-social-system.md §8、§9.4。
@@ -10,6 +10,23 @@ const view = (o: Partial<TargetView> = {}): TargetView => ({
   debt: 0,
   fear: 0,
   ...o,
+});
+
+describe('C016e3d refusal semantic boundary', () => {
+  test('表达、议价终态、群体投票、委托终态和目标裁决保持五种不同语义', () => {
+    expect(refusalSemanticFor({ actionType: 'talk', speechAct: 'refuse' })).toBe(
+      'expression_only',
+    );
+    expect(refusalSemanticFor({ actionType: 'negotiate', operation: 'reject' })).toBe(
+      'negotiation_terminal',
+    );
+    expect(refusalSemanticFor({ actionType: 'group_decide', choice: 'oppose' })).toBe(
+      'group_vote',
+    );
+    expect(refusalSemanticFor({ actionType: 'decline_request' })).toBe('request_terminal');
+    expect(refusalSemanticFor({ actionType: 'gift' })).toBe('target_action_outcome');
+    expect(refusalSemanticFor({ actionType: 'talk', speechAct: 'inform' })).toBeNull();
+  });
 });
 
 describe('evaluateRefusal', () => {

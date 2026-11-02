@@ -1,0 +1,786 @@
+// 玩家对话 v1 · 世界单、人物卡与说话方式。
+// 世界单和人物卡是给 AI 的固定前缀（每次原样带上，命中缓存）；说话方式是规则直接用的模板。
+// 模板里的 {…} 由规则用真实事实填空：{place} 地点、{activity} 手上的事、{breakFrom} 歇完要接着做的事、
+// {plan} 明天的打算、{news} 听来的事（按他自己知道的版本）、{person} 人名、{memory} 和玩家聊过的事、
+// {name} 玩家的名字（nameKnown 答"我叫什么"）、{when} 多久以前（"前天""刚才"）、{reason} 收尾的理由、{base} 这一句本来要说的话（"上回说过"时套在外面）。
+// 模板只说规则兑现得了的话：不许诺带路、留东西这类规则不会去做的事。
+
+export type DialogueVoice =
+  | 'curt'
+  | 'wary'
+  | 'upright'
+  | 'gentle'
+  | 'shrewd'
+  | 'merchant'
+  | 'formal'
+  | 'steady'
+  | 'warm';
+
+export type DialoguePhrase =
+  | 'greetStranger'
+  | 'greetKnown'
+  | 'greetBack'
+  | 'farewell'
+  | 'thanks'
+  | 'activity'
+  | 'activityIdle'
+  | 'activityBreak'
+  | 'plan'
+  | 'newsNone'
+  | 'newsNoMore'
+  | 'newsTell'
+  | 'newsTellBad'
+  | 'personFriend'
+  | 'personGood'
+  | 'personNeutral'
+  | 'personBad'
+  | 'personGrudge'
+  | 'personAgain'
+  | 'remember'
+  | 'rememberNamed'
+  | 'rememberNone'
+  | 'nameKnown'
+  | 'nameUnknown'
+  | 'giveYes'
+  | 'giveNo'
+  | 'giveNone'
+  | 'outOfWorld'
+  | 'denyClaim'
+  | 'deflect'
+  | 'ack'
+  | 'caredFor'
+  | 'praised'
+  | 'crudeReact'
+  | 'rebuke'
+  | 'stormOff'
+  | 'refuseTalk'
+  | 'greetCold'
+  | 'greetColdStranger'
+  | 'rememberCold'
+  | 'openAccuse'
+  | 'openAccuseSaw'
+  | 'saidAlready'
+  | 'apologyAccepted'
+  | 'apologyCold'
+  | 'apologyAgain'
+  | 'apologyElsewhere'
+  | 'apologyNone'
+  | 'close'
+  | 'closeGo'
+  | 'closeDuty'
+  | 'introduceAck'
+  | 'openNews'
+  | 'openKnown'
+  | 'openRecall'
+  | 'openReturned'
+  | 'openNewcomer';
+
+export type DialoguePersona = {
+  actorId: string;
+  name: string;
+  role: string;
+  innerTrait: string;
+  outerTrait: string;
+  voice: DialogueVoice;
+  // 给 AI 的人物卡：身份、性子、说话的样子、在意什么。不超过两百字，不随时间变。
+  card: string;
+};
+
+export const DIALOGUE_PERSONAS: Record<string, DialoguePersona> = {
+  'life:q6:remote_gatherer': {
+    actorId: 'life:q6:remote_gatherer',
+    name: '远行采药人',
+    role: '外门弟子，常去远处采药',
+    innerTrait: '中庸',
+    outerTrait: '孤僻',
+    voice: 'curt',
+    card: '你话很少，句子短，不爱寒暄，也不爱打听别人的事。对药草熟，问到草药会多说两句。不喜欢人多的地方，熟了以后才肯多聊。',
+  },
+  'life:q6:explorer': {
+    actorId: 'life:q6:explorer',
+    name: '谨慎行脚弟子',
+    role: '外门弟子，常在山里行走',
+    innerTrait: '中庸',
+    outerTrait: '孤僻',
+    voice: 'wary',
+    card: '你小心谨慎，对生人有戒心，说话留余地，常提醒别人小心。听来的事总要加一句"真假不好说"。',
+  },
+  'life:q6:quester': {
+    actorId: 'life:q6:quester',
+    name: '重诺弟子',
+    role: '外门弟子，常接委托替人办事',
+    innerTrait: '正直',
+    outerTrait: '义气',
+    voice: 'upright',
+    card: '你直爽，讲道理，说到做到，看不惯欺负人的事，肯为朋友出头。说话痛快，不绕弯子，对新来的人很热情。',
+  },
+  'life:q6:emergency': {
+    actorId: 'life:q6:emergency',
+    name: '返山弟子',
+    role: '外门弟子，刚从山外回来不久',
+    innerTrait: '中庸',
+    outerTrait: '爱家',
+    voice: 'gentle',
+    card: '你性子温和，把山门当家，惦记身边的人吃饱没有、累不累。说话柔和，不爱争，遇到不痛快的事宁可不提。',
+  },
+  'life:q6:seller': {
+    actorId: 'life:q6:seller',
+    name: '卖药弟子',
+    role: '外门弟子，采药拿去坊市卖',
+    innerTrait: '利己',
+    outerTrait: '名声',
+    voice: 'shrewd',
+    card: '你精明，三句话不离灵石和买卖，爱打听也爱说别人的闲话，喜欢显得消息灵通。吃不得亏，说起和别人的过节总觉得是对方的错。',
+  },
+  'life:q6:merchant': {
+    actorId: 'life:q6:merchant',
+    name: '河湾掌柜',
+    role: '青石坊市药铺的掌柜',
+    innerTrait: '利己',
+    outerTrait: '名声',
+    voice: 'merchant',
+    card: '你是生意人，嘴上客气，心里算账，称人"客官"。消息多半是来往的客人说的。买卖归买卖，从不白送东西。',
+  },
+  'life:q6:guard': {
+    actorId: 'life:q6:guard',
+    name: '丹房守卫',
+    role: '丹房守备处的守卫',
+    innerTrait: '正直',
+    outerTrait: '忠贞',
+    voice: 'formal',
+    card: '你守规矩，话短，职责在身时不闲聊，对外人先问来意。说话像禀报，不评人长短，除非对方确实坏了规矩。',
+  },
+  'life:q6:cultivator': {
+    actorId: 'life:q6:cultivator',
+    name: '守静弟子',
+    role: '内门弟子，专心修行',
+    innerTrait: '中庸',
+    outerTrait: '权力',
+    voice: 'steady',
+    card: '你稳重，有分寸，说话文雅，在意修为和在宗门里的地位。不轻易表态，评人留三分。',
+  },
+  'life:q6:tired': {
+    actorId: 'life:q6:tired',
+    name: '疲惫弟子',
+    role: '外门弟子，活多，常显得累',
+    innerTrait: '无私',
+    outerTrait: '义气',
+    voice: 'warm',
+    card: '你热心，爱帮人，总是有点累但从不推辞。说话亲切，常问别人要不要帮忙，提到朋友就高兴。',
+  },
+  'life:q6:local_gatherer': {
+    actorId: 'life:q6:local_gatherer',
+    name: '药圃弟子',
+    role: '外门弟子，照看凝露药圃',
+    innerTrait: '无私',
+    outerTrait: '天伦',
+    voice: 'warm',
+    card: '你朴实，勤快，常念叨家里人，照看药圃像照看自家的田。说话实在，乐意把知道的告诉别人。',
+  },
+};
+
+// 世界单：这个世界里有的地方、人和日常。所有 NPC 共用，放在提示词最前面（命中缓存）；
+// 没列出的地方、铺子、东西，AI 不许编。
+export type DialogueWorldSheet = {
+  region: string;
+  places: ReadonlyArray<{ name: string; note: string }>;
+  people: ReadonlyArray<{ name: string; note: string }>;
+  life: string;
+};
+
+// 各人住哪一间（常识单"住哪"一节；说到住处时连同那条常识一起给 AI，免得几个人都说住"东边第三间"）。
+export const DIALOGUE_ROOMS_Q6: Readonly<Record<string, string>> = {
+  'life:q6:quester': '东排头一间',
+  'life:q6:seller': '东排第二间',
+  'life:q6:tired': '东排第三间',
+  'life:q6:remote_gatherer': '东排最里头一间',
+  'life:q6:emergency': '西排头一间',
+  'life:q6:local_gatherer': '西排第二间，挨着井',
+  'life:q6:explorer': '西排第三间',
+  'life:q6:cultivator': '院子最里头那间',
+  'life:q6:merchant': '坊市药铺后头',
+  'life:q6:guard': '丹房守备处的值房',
+};
+
+// 山里的生活常识（v1.7，依据 docs/世界逻辑/青岚山外门_生活常识_草案.md）：按话题分条，玩家说到哪一类，
+// 规则才把那一条带给 AI（不整张塞进每次的提示词，省 token；一回只带最相关的一条）。cue 是说到这类话题的字眼。
+// 一句话说到好几类时，排在前面的先带（v1.7 第三轮自测补）：问到人（管事、执事、长老、师父）最容易编，排第一，
+// 免得"管册执事住哪屋"带成了住处那条；灵草排在路前面，免得"青叶参在哪儿"只带了路；"在哪"太泛，路排在后头。
+export type LifeFactTopic = 'food' | 'lodging' | 'rooms' | 'routes' | 'herbs' | 'shop' | 'caretaker';
+export const DIALOGUE_LIFE_FACTS_Q6: ReadonlyArray<{ topic: LifeFactTopic; cue: RegExp; fact: string }> = [
+  {
+    topic: 'caretaker',
+    // （v1.7 第三轮补"柴"：两个人一个说柴是劈好的、一个说自己劈。）
+    cue: /管事|执事|杂役|管杂|谁管|长老|师父|师傅|杂事|扫院|挑水|柴|看灶|干杂活|丹房能进|进丹房/u,
+    // （"杂事大家轮着做"在世界那一行里，每回都带，这里不重复。）
+    fact: '外门没有管事，也没有管事处；执事堂管名册、口粮、委托，在内门，平时见不着；长老在内门；外门弟子没师父带；丹房外门弟子进不去',
+  },
+  {
+    topic: 'herbs',
+    // （"你叫什么"问的是名字，不算；"参加""参观"不算；"远行采药人"是人名，不算。第三轮补"青叶参在哪儿采"。）
+    cue: /灵草|草药|药草|凝露|采药(?!人)|药瘴|什么草|啥草|这草|那草|草叫|什么药|药圃里|参(?![加观谋与拜考见透悟])|灵芝|采[吗呢啊呀？?]*$/u,
+    // （第七轮补"别处没有"：有人说返山弟子是"从山外回来路上"沾上的药瘴。）
+    fact: '山里只有一种灵草，叫凝露草，长在药圃，冬天不长；药圃偶尔起药瘴（别处没有），会伤人',
+  },
+  {
+    topic: 'food',
+    // （"肉身"不算。）
+    cue: /吃|饭|饿|饱|食|灶|厨|伙房|口粮|米|菜|肉(?!身)|点心|喝水|渴|井|辟谷|仓房|名册/u,
+    // （第六轮补"不上锁"：一个说仓房没门锁，一个说钥匙挂在灶房梁上。）
+    fact: '一天两顿；口粮是宗门每十天送的灵稻米、干菜咸菜，放仓房，不上锁没人管，照门口名册自己领，新弟子早记上了；井、仓房、公用灶房在院子西头，自己做或搭伙；没有饭堂，坊市不卖饭菜',
+  },
+  {
+    // 谁住哪间（v1.7 第三轮补：有人说"谨慎行脚弟子住东排北头"，他住西排第三间）。和 DIALOGUE_ROOMS_Q6 一致，测试核对。
+    topic: 'rooms',
+    cue: /谁住|住[的着]?谁|有人住|住人|隔壁|邻居|对门|[东西]排|空[屋房]|空着的|我住哪|我住几|我睡哪|新来的住|(?:弟子|采药人)住|[他她]住/u,
+    // （第五轮："第四间空着"没写哪排，有人说成了东排第四间。）
+    fact: '生活院就一个院子：东排依次住重诺弟子、卖药弟子、疲惫弟子、远行采药人；西排依次住返山弟子、药圃弟子、谨慎行脚弟子，西排第四间空着，给新来的道友；守静弟子住院子最里头那间',
+  },
+  {
+    topic: 'lodging',
+    // （"记住""住手""忍不住的""靠得住的"不算。v1.7 自测补："你住几号院""住哪间"。）
+    cue: /(?<![记抓按挡拦顶站忍禁憋稳保止不得])住(?:哪|在|处|的|这|那|院|屋|下|得|着|几|[甲乙丙丁东西南北])|睡哪|睡在|屋子|房间|宿|床|落脚|[几哪](?:号|个)?院|[甲乙丙丁东西南北]院/u,
+    fact: '外门弟子都住生活院，就一个院子，东西两排平房，一人一间，没有甲院乙院；守静弟子是内门下来静修的；掌柜住坊市药铺后头，守卫住丹房守备处',
+  },
+  {
+    topic: 'routes',
+    // （第五轮补"三刻钟那么远啊，有近道没"——掌柜编了条"绕药圃后头的小径"。"远行采药人""永远"不算。）
+    cue: /怎么走|怎么去|怎么到|咋走|咋去|咋到|在哪|哪儿|哪里|(?<!永)远(?!行)|近道|近路|捷径|抄近|小路|小道|方向|往哪/u,
+    fact: '从生活院往山下河湾是坊市，往山口是歇脚亭，往后山坡是药圃，往上半山是丹房；各处之间走哪段都是三刻钟上下，没有近道；五处之外没别处，再往外是下山的路',
+  },
+  {
+    topic: 'shop',
+    // （"卖药弟子"是人名，"御剑"不是买剑，都不算。）
+    cue: /疗伤丹|聚气丹|宁心丹|丹药|符箓|木剑|铁剑|青锋剑|买剑|法器|买(?!卖)|(?<!买)卖(?!药弟子)|价钱|价格|多少钱|多少灵石|灵石|药铺|什么货|啥货|有货/u,
+    fact: '药铺收灵草，卖疗伤丹、聚气丹、宁心丹、符箓、木剑、铁剑、青锋剑和几样小法器，价看货多少；灵石攒着修炼、突破用',
+  },
+];
+
+export const DIALOGUE_WORLD_Q6: DialogueWorldSheet = {
+  region: '太虚界青岚山的外门',
+  places: [
+    { name: '山门生活院', note: '弟子们起居的院子，多在这儿修炼、歇息' },
+    { name: '凝露药圃', note: '种灵草、采药的地方' },
+    { name: '青石坊市', note: '卖灵草换灵石的集市，河湾掌柜的药铺在这儿' },
+    { name: '松风歇脚亭', note: '路边歇脚的亭子' },
+    { name: '丹房守备处', note: '丹房守卫当值的地方' },
+  ],
+  people: Object.values(DIALOGUE_PERSONAS).map((persona) => ({ name: persona.name, note: persona.role })),
+  life: '大家采药、卖药换灵石、修炼、接委托替人办事、当值，闲了串门说话，偶尔互送一株灵草。除了河湾掌柜的药铺，山里没处买东西；挣的灵石都攒着修炼、突破用。外门没有管事；扫院、挑水、劈柴这些杂事大家轮着做，缺什么、有什么事，同门之间商量着办。',
+};
+
+// 每种说话方式的常用话。同一类话准备两三种说法；同一个人对同一位玩家，说过的说法尽量不再说。
+export const DIALOGUE_PHRASEBOOK: Record<DialogueVoice, Partial<Record<DialoguePhrase, string[]>>> = {
+  curt: {
+    greetStranger: ['嗯。', '有事？'],
+    greetKnown: ['是你啊。', '嗯，又见面了。'],
+    greetBack: ['嗯。'],
+    farewell: ['嗯，走吧。', '慢走。'],
+    thanks: ['不用。', '嗯。'],
+    activity: ['{activity}。', '在{place}{activity}，没别的。'],
+    activityIdle: ['歇着。', '没忙什么。'],
+    activityBreak: ['{breakFrom}了一阵，歇会儿。', '歇口气，待会儿接着{breakFrom}。'],
+    plan: ['{plan}。', '明天？{plan}吧。'],
+    newsNone: ['没听说什么。', '不清楚，我不打听这些。'],
+    newsNoMore: ['就那些。', '别的不知道。'],
+    newsTell: ['听说{news}。', '就听人说{news}，别的不知道。'],
+    personFriend: ['{person}信得过。'],
+    personGood: ['{person}？人不错。', '{person}挺好。'],
+    personNeutral: ['不熟。', '{person}？没怎么打过交道。'],
+    personBad: ['{person}爱惹事，少跟他来往。'],
+    personGrudge: ['别跟我提{person}。'],
+    personAgain: ['说过了。{base}', '还是那句，{base}'],
+    remember: ['记得，上回你{memory}。'],
+    rememberNamed: ['记得，{name}。', '{name}，记得。'],
+    rememberNone: ['没印象。'],
+    nameKnown: ['{name}。'],
+    nameUnknown: ['你没说过。'],
+    giveYes: ['拿去吧。'],
+    giveNo: ['这个不送。'],
+    giveNone: ['我手上没有。', '没有。'],
+    outOfWorld: ['听不懂你说什么。', '你说的这些，山里没有。', '什么？听不懂。'],
+    denyClaim: ['没这回事。', '我没答应过。'],
+    deflect: ['……嗯。', '不好说。'],
+    ack: ['嗯。', '……'],
+    caredFor: ['还行。', '没事。'],
+    praised: ['过奖。'],
+    crudeReact: ['……'],
+    rebuke: ['嘴放干净点。'],
+    stormOff: ['懒得理你。'],
+    refuseTalk: ['没空。'],
+    greetCold: ['……是你。'],
+    greetColdStranger: ['……有事？'],
+    rememberCold: ['记得，你{memory}。'],
+    openAccuse: ['听说你骂人了。'],
+    openAccuseSaw: ['……{when}你骂人，我看见了。'],
+    saidAlready: ['说过了。'],
+    apologyAccepted: ['……嗯。', '知道了。'],
+    apologyCold: ['……哼。'],
+    apologyAgain: ['说过了。'],
+    apologyElsewhere: ['跟我说没用，找{person}去。'],
+    apologyNone: ['……没事。'],
+    close: ['我得{reason}了。', '不说了，{reason}。'],
+    closeGo: ['{reason}，先走了。'],
+    introduceAck: ['嗯，记住了。'],
+    openNews: ['听说{news}，你知道吗？'],
+    openKnown: ['是你。'],
+    openRecall: ['……{when}你{memory}。'],
+    openReturned: ['……来了。'],
+  },
+  wary: {
+    greetStranger: ['……道友面生得很，有事？', '道友是哪里来的？'],
+    greetKnown: ['哦，是你。', '又见面了，道友。'],
+    greetBack: ['道友。'],
+    farewell: ['路上小心。', '慢走，天黑前早些回去。'],
+    thanks: ['客气了。', '不必。'],
+    activity: ['在{place}{activity}，图个清静。', '{activity}，别处人多。'],
+    activityIdle: ['没忙什么，在这儿坐坐，图个清静。'],
+    activityBreak: ['{breakFrom}了一阵，出来透口气。'],
+    plan: ['{plan}，看看再说。', '说不准，{plan}吧。'],
+    newsNone: ['最近没什么动静，我也不爱打听。'],
+    newsNoMore: ['就这些，别的我也说不准。'],
+    newsTell: ['听说{news}——不过我也是听人说的。', '有人说{news}，真假不好说。'],
+    personFriend: ['{person}是信得过的人。'],
+    personGood: ['{person}还算靠得住。'],
+    personNeutral: ['{person}？不太熟，不好说。'],
+    personBad: ['{person}啊，听说他爱惹事，你留个心。'],
+    personGrudge: ['{person}的事我不想多说。'],
+    personAgain: ['上回说过了，{base}'],
+    remember: ['记得，你上回{memory}。'],
+    rememberNamed: ['记得，你是{name}。上回你{memory}。', '{name}道友，记得。上回你{memory}。'],
+    rememberNone: ['好像没见过道友。'],
+    nameKnown: ['道友说过，叫{name}。'],
+    nameUnknown: ['道友没报过名字。'],
+    giveYes: ['……也罢，这株你拿去。'],
+    giveNo: ['这个我留着有用，对不住。'],
+    giveNone: ['我手上没有能送的。'],
+    outOfWorld: ['道友说的这些古怪词，我没听过。别是中了什么邪？', '这话我听不懂。'],
+    denyClaim: ['我可不记得答应过什么，道友别记岔了。', '没有的事，道友怕是认错人了。'],
+    deflect: ['……这话不好接。'],
+    ack: ['嗯。', '……就这样。'],
+    caredFor: ['还好……多谢。'],
+    praised: ['……过奖了。'],
+    crudeReact: ['……道友说话小心些。'],
+    rebuke: ['……你想干什么？'],
+    stormOff: ['……我走了，你自便。'],
+    refuseTalk: ['你别过来。'],
+    greetCold: ['你又来做什么？'],
+    greetColdStranger: ['……道友有何贵干？'],
+    rememberCold: ['记得。你上回{memory}。'],
+    openAccuse: ['听说你骂了{person}……你脾气不小啊。'],
+    openAccuseSaw: ['{when}你骂{person}，我都瞧见了……你脾气不小啊。'],
+    saidAlready: ['……刚说过。'],
+    apologyAccepted: ['……行吧，下回注意些。'],
+    apologyCold: ['……'],
+    apologyAgain: ['知道了，不用一直说。'],
+    apologyElsewhere: ['这话你该跟{person}说。'],
+    apologyNone: ['道友不必如此。'],
+    close: ['我该{reason}了，道友自便。', '不多说了，我得{reason}。'],
+    closeGo: ['我得{reason}，先走一步。'],
+    introduceAck: ['好，我记下了。'],
+    openNews: ['道友，听说没有？{news}。'],
+    openKnown: ['道友，又碰上了。'],
+    openRecall: ['……又是你。{when}你{memory}，我记着呢。'],
+    openReturned: ['……还真来了。'],
+  },
+  upright: {
+    greetStranger: ['道友好！看着面生，新来的？', '这位道友有礼。'],
+    greetKnown: ['是你啊！又见面了。', '道友来了，坐。'],
+    greetBack: ['道友好！'],
+    farewell: ['好，回头见！', '慢走，有事来找我。'],
+    thanks: ['客气什么，应该的。', '举手之劳，不必谢。'],
+    activity: ['正在{place}{activity}呢。', '{activity}，手上的事得做完。'],
+    activityIdle: ['没什么事，正闲着呢。', '刚忙完，歇口气。'],
+    activityBreak: ['刚{breakFrom}完一轮，歇口气。'],
+    plan: ['明天{plan}。', '明天啊，{plan}。'],
+    newsNone: ['这几天倒没什么大事。'],
+    newsNoMore: ['我知道的都跟你说了。', '就刚才说的那些，别的没听说。'],
+    newsTell: ['你还不知道？{news}。', '说起来，{news}。', '跟你说件事，{news}。'],
+    personFriend: ['{person}是我好友，人很靠得住。'],
+    personGood: ['{person}为人不错。', '{person}挺热心的。'],
+    personNeutral: ['{person}？打过照面，不太熟。'],
+    personBad: ['{person}啊，爱惹事，我看不惯。'],
+    personGrudge: ['我跟{person}前阵子闹得不太愉快。'],
+    personAgain: ['上回说过啦，{base}'],
+    remember: ['当然记得，上回你{memory}。'],
+    rememberNamed: ['当然记得，你是{name}！上回你{memory}。', '{name}嘛，记得！上回你{memory}。'],
+    rememberNone: ['咱们……之前见过吗？'],
+    nameKnown: ['你说你叫{name}，我记着呢。'],
+    nameUnknown: ['道友还没告诉我怎么称呼呢。'],
+    giveYes: ['行，这株你拿去用。'],
+    giveNo: ['这株另有用处，不能给你，对不住。'],
+    giveNone: ['我手上没有，有了再说。'],
+    outOfWorld: ['道友这话我听不明白，是哪里的方言？', '你说的这些我一句也没听懂。'],
+    denyClaim: ['我可没答应过这个，道友记错人了吧？', '没有的事。我答应过的事从不赖，可这个真没有。'],
+    deflect: ['哈哈，道友说笑了。', '这个嘛，一时也说不好。'],
+    ack: ['嗯，就这么回事。', '是啊。'],
+    caredFor: ['还行，多谢惦记！', '好着呢，你也别太累。'],
+    praised: ['哈哈，过奖过奖！'],
+    crudeReact: ['道友，说话文雅些。'],
+    rebuke: ['道友，说话放尊重些！', '有话好好说，骂人算什么本事？'],
+    stormOff: ['不跟你说了，你这人没法讲理！'],
+    refuseTalk: ['我跟你没什么好说的。'],
+    greetCold: ['哼，是你。'],
+    greetColdStranger: ['嗯。有事说事。'],
+    rememberCold: ['记得，上回你{memory}。'],
+    openAccuse: ['听说你骂了{person}？有话好好说，骂人算什么本事。'],
+    openAccuseSaw: ['{when}你骂{person}，我都看见了！有话好好说，骂人算什么本事。'],
+    saidAlready: ['刚才不是说过了嘛。'],
+    apologyAccepted: ['行，知错能改就好，下不为例！', '说开了就好，下回可别这样了。'],
+    apologyCold: ['哼，知道错就好。'],
+    apologyAgain: ['行了行了，说一遍就够了。'],
+    apologyElsewhere: ['跟我道什么歉？你该去跟{person}赔不是！'],
+    apologyNone: ['道什么歉，又没什么事。'],
+    close: ['我得{reason}了，改天再聊！', '我得{reason}了，回聊！'],
+    closeGo: ['走了走了，我得{reason}，改天再聊！'],
+    introduceAck: ['好，记住了！'],
+    openNews: ['道友，你听说了吗？{news}。'],
+    openKnown: ['道友！又碰上了。'],
+    openRecall: ['道友来了！{when}你{memory}，我还记得。'],
+    openReturned: ['道友果然守信，说来就来！'],
+    openNewcomer: ['你是新来的吧？有什么不懂的尽管问我。'],
+  },
+  gentle: {
+    greetStranger: ['道友好呀，新来的吧？', '你好，一路辛苦了。'],
+    greetKnown: ['是你呀，又见面了。', '来啦。'],
+    greetBack: ['你好呀。'],
+    farewell: ['路上慢点。', '好，有空再来坐。'],
+    thanks: ['不用谢，都是一家人似的。', '别客气。'],
+    activity: ['在{place}{activity}呢。', '{activity}，日子就这么过。'],
+    activityIdle: ['闲着呢，坐一会儿。', '没忙什么，歇歇脚。'],
+    activityBreak: ['{breakFrom}了半天，歇一歇。'],
+    plan: ['{plan}，安安稳稳的就好。', '明天啊，{plan}。'],
+    newsNone: ['最近还算太平。'],
+    newsNoMore: ['就这些了，别的没听说。'],
+    newsTell: ['听说{news}。', '前两天{news}。'],
+    newsTellBad: ['听说{news}，唉。', '前两天{news}，唉，何苦呢。'],
+    personFriend: ['{person}待我很好，跟家里人似的。'],
+    personGood: ['{person}人挺好的。'],
+    personNeutral: ['{person}啊，不太熟，见了面点个头。'],
+    personBad: ['{person}脾气大，大家都躲着他些。'],
+    personGrudge: ['我和{person}有些不痛快，不提了。'],
+    personAgain: ['上回说过的呀，{base}'],
+    remember: ['记得呀，上回你{memory}。'],
+    rememberNamed: ['记得呀，你是{name}嘛。上回你{memory}。', '{name}呀，怎么会不记得。上回你{memory}。'],
+    rememberNone: ['我们见过吗？'],
+    nameKnown: ['你说你叫{name}呀。'],
+    nameUnknown: ['你还没告诉我呀。'],
+    giveYes: ['你拿着吧，别客气。'],
+    giveNo: ['这株我得留着，对不住呀。'],
+    giveNone: ['我这儿没有，对不住呀。', '手上空了，下回有了再说。'],
+    outOfWorld: ['你说的我听不懂，是不是累着了？去歇歇吧。', '这些话我没听过。'],
+    denyClaim: ['我记得没说过这话呀，是不是记岔了？', '这……我真不记得答应过，道友别是记混了人。'],
+    deflect: ['这……你说的我一时不知怎么接。', '嗯……让我想想。'],
+    ack: ['嗯嗯。', '是呀。'],
+    caredFor: ['我挺好的，你也照顾好自己呀。', '还好还好，多谢你惦记。'],
+    praised: ['哪有呀，你过奖了。'],
+    crudeReact: ['哎呀，说话别这么冲。'],
+    rebuke: ['你……怎么这样说话。', '别这么凶嘛，有话好好说。'],
+    stormOff: ['你……我不跟你说了。'],
+    refuseTalk: ['……我现在不想跟你说话。'],
+    greetCold: ['……是你呀。'],
+    greetColdStranger: ['……你好。'],
+    rememberCold: ['记得……上回你{memory}。'],
+    openAccuse: ['听说你跟{person}闹得不愉快？'],
+    openAccuseSaw: ['{when}你跟{person}……我都看见了。'],
+    saidAlready: ['刚才说过啦。'],
+    apologyAccepted: ['嗯……我知道了，下次别这样了。', '好啦，我不怪你了。'],
+    apologyCold: ['……嗯。'],
+    apologyAgain: ['你都说过了，我知道的。'],
+    apologyElsewhere: ['你该去跟{person}说一声才是。'],
+    apologyNone: ['没事呀，道什么歉。'],
+    close: ['我得{reason}了，有空再来坐。', '不陪你啦，我得{reason}，你也别太累着。'],
+    closeGo: ['我先走啦，得{reason}，你忙你的。'],
+    introduceAck: ['好，我记住啦。'],
+    openNews: ['道友，你听说没？{news}。'],
+    openKnown: ['你来啦。'],
+    openRecall: ['你来啦……{when}你{memory}，我还记着呢。'],
+    openReturned: ['你真的来啦。'],
+    openNewcomer: ['新来的吧？吃过饭没有？'],
+  },
+  shrewd: {
+    greetStranger: ['哟，新面孔。道友打哪儿来？', '道友好，要买灵草找我。'],
+    greetKnown: ['哟，又是你。', '道友来了，今天有什么好消息？'],
+    greetBack: ['好好。'],
+    farewell: ['慢走，有好消息记得找我。', '回见。'],
+    thanks: ['好说好说。', '客气，记着我的好就行。'],
+    activity: ['在{place}{activity}，忙着挣几块灵石。', '{activity}呢，这年头不忙不行。'],
+    activityIdle: ['闲着呢，琢磨去哪儿挣几块灵石。'],
+    activityBreak: ['刚{breakFrom}完一轮，歇口气，待会儿还得接着来。'],
+    plan: ['明天？{plan}。', '{plan}，看情形吧。'],
+    newsNone: ['这几天没什么新鲜的，有了我头一个告诉你。'],
+    newsNoMore: ['最新的就这些了。', '就刚说的那件，别的还没打听到。'],
+    newsTell: ['你还不知道吧？{news}。', '跟你说个事，{news}。'],
+    personFriend: ['{person}跟我关系不错。'],
+    personGood: ['{person}？人还行，就是太老实。'],
+    personNeutral: ['{person}啊，没什么交情。'],
+    personBad: ['{person}？那人不好打交道。'],
+    personGrudge: ['哼，{person}，别提了。'],
+    personAgain: ['上回不是说了嘛，{base}'],
+    remember: ['记得记得，上回你{memory}。'],
+    rememberNamed: ['记得记得，{name}嘛！上回你{memory}。', '{name}啊，怎么不记得！上回你{memory}。'],
+    rememberNone: ['没印象，道友怎么称呼？'],
+    nameKnown: ['{name}嘛，你自己说的。'],
+    nameUnknown: ['你又没报过名号，我上哪儿知道去？'],
+    giveYes: ['行吧，送你一株，记着我的好。'],
+    giveNo: ['这可是要卖钱的，送不得。', '白送？那可不行。'],
+    giveNone: ['手上没货了。', '眼下没货。'],
+    outOfWorld: ['道友说的这些我听不懂，能换几块灵石？', '什么乱七八糟的。', '你这话说的，我一个字也没听懂。'],
+    denyClaim: ['哟，空口白牙的，我什么时候答应过？', '这话可不能乱说，我可没应过。'],
+    deflect: ['道友这话说的，我可接不住。', '嘿，这话你也说得出口。'],
+    ack: ['可不是嘛。', '嗯哼。'],
+    caredFor: ['托福，还死不了。', '好着呢，多谢挂念。'],
+    praised: ['那是，这点眼力还是有的。'],
+    crudeReact: ['哟，火气不小。'],
+    rebuke: ['嘿，嘴巴放干净点！', '骂谁呢？我可不吃这一套。'],
+    stormOff: ['行，你厉害，我不奉陪了！', '呸，晦气！'],
+    refuseTalk: ['哟，还有脸来？走走走。'],
+    greetCold: ['哟，又是你，今天嘴巴干净了？'],
+    greetColdStranger: ['哟，你就是那位……有事？'],
+    rememberCold: ['哼，怎么不记得，上回你{memory}。'],
+    openAccuse: ['哟，听说你把{person}骂了一顿？'],
+    openAccuseSaw: ['哟，{when}那一出我可都瞧见了，你把{person}骂得不轻啊。'],
+    saidAlready: ['刚说过了，道友记性不行啊。'],
+    apologyAccepted: ['哼，算你识相。', '行吧，这回不跟你计较。'],
+    apologyCold: ['哟，现在知道赔不是了？'],
+    apologyAgain: ['行了，听见了。'],
+    apologyElsewhere: ['跟我赔什么不是，去跟{person}说去。'],
+    apologyNone: ['哟，赔什么不是？'],
+    close: ['不聊了，我得{reason}。', '行了，我得{reason}，有消息再跟你说。'],
+    closeGo: ['走了，得{reason}，耽误不得。'],
+    introduceAck: ['好，记下了。'],
+    openNews: ['哟，道友来得巧，有件新鲜事——{news}。'],
+    openKnown: ['哟，道友！'],
+    openRecall: ['哟，又来了？{when}你{memory}，我可都记着。'],
+    openReturned: ['哟，还真来了。'],
+    openNewcomer: ['新来的吧？要灵草找我，价钱公道。'],
+  },
+  merchant: {
+    greetStranger: ['客官看看？药铺收灵草，价钱公道。', '客官面生，头一回来？'],
+    greetKnown: ['哟，客官又来了。', '客官来了，里边请。'],
+    greetBack: ['客官好。'],
+    farewell: ['慢走，常来。', '客官慢走。'],
+    thanks: ['好说。'],
+    activity: ['守着铺子呢，{activity}。'],
+    activityIdle: ['守着铺子，等客人上门。'],
+    activityBreak: ['歇口气，铺子还开着。'],
+    plan: ['{plan}。'],
+    newsNone: ['铺子里没什么新鲜事。'],
+    newsNoMore: ['就听来这些。'],
+    newsTell: ['听来往的客人说，{news}。'],
+    personFriend: ['{person}是老主顾，靠得住。'],
+    personGood: ['{person}做事爽快。'],
+    personNeutral: ['{person}？不大来铺子。'],
+    personBad: ['{person}啊，难打交道。'],
+    personGrudge: ['{person}的生意我不做了。'],
+    personAgain: ['上回说过了，{base}'],
+    remember: ['记得，客官上回{memory}。'],
+    rememberNamed: ['记得，{name}客官嘛。'],
+    rememberNone: ['客官面生得很。'],
+    nameKnown: ['客官说过，叫{name}。'],
+    nameUnknown: ['客官还没报过尊姓大名呢。'],
+    giveYes: ['行，这回算我送的。'],
+    giveNo: ['买卖归买卖，送是不送的。'],
+    giveNone: ['铺里没货了。'],
+    outOfWorld: ['客官说笑了。', '这话小店听不懂。'],
+    denyClaim: ['客官说笑了，小店没应过这事。'],
+    deflect: ['客官说笑了。'],
+    ack: ['是是。', '正是。'],
+    caredFor: ['托客官的福。'],
+    praised: ['客官过奖了。'],
+    crudeReact: ['客官，慢慢说。'],
+    rebuke: ['客官，和气生财。'],
+    stormOff: ['小店不招待客官了，请回吧。'],
+    refuseTalk: ['小店今日不做客官的生意。'],
+    greetCold: ['客官……有何贵干？'],
+    greetColdStranger: ['客官……有何贵干？'],
+    rememberCold: ['记得，客官上回发过火。'],
+    openAccuse: ['听说客官跟{person}起了争执？'],
+    openAccuseSaw: ['客官{when}跟{person}起了争执，小店都瞧见了。'],
+    saidAlready: ['客官，方才说过了。'],
+    apologyAccepted: ['客官言重了，和气生财。'],
+    apologyCold: ['……客官请回吧。'],
+    apologyAgain: ['客官说过了。'],
+    apologyElsewhere: ['这话客官该跟{person}说。'],
+    apologyNone: ['客官客气了。'],
+    close: ['有客人来了，失陪。', '客官稍坐，我得{reason}。'],
+    closeGo: ['客官慢走，我得{reason}。'],
+    closeDuty: ['有客人来了，失陪。'],
+    introduceAck: ['记下了，客官。'],
+    openKnown: ['哟，客官来了。'],
+    openRecall: ['哟，客官又来了。{when}客官{memory}，小店还记着呢。'],
+    openReturned: ['客官果然又来了。'],
+    openNewcomer: ['客官面生，第一回来？'],
+  },
+  formal: {
+    greetStranger: ['何人？此处是丹房守备处。', '道友有事请讲。'],
+    greetKnown: ['道友。', '道友来了。'],
+    greetBack: ['道友。'],
+    farewell: ['请。', '慢走。'],
+    thanks: ['分内之事。'],
+    activity: ['正在{place}{activity}。', '{activity}，职责所在。'],
+    activityIdle: ['轮休，在{place}歇着。'],
+    activityBreak: ['{breakFrom}间歇，稍事休息。'],
+    plan: ['{plan}。'],
+    newsNone: ['无事可报。'],
+    newsNoMore: ['所知已尽数相告。'],
+    newsTell: ['听闻{news}。'],
+    personFriend: ['{person}可信。'],
+    personGood: ['{person}行事规矩。'],
+    personNeutral: ['{person}，不熟。'],
+    personBad: ['{person}多生事端。'],
+    personGrudge: ['{person}，不便评说。'],
+    personAgain: ['前次已说过：{base}'],
+    remember: ['记得，道友上回{memory}。'],
+    rememberNamed: ['记得，{name}。', '{name}，记得。'],
+    rememberNone: ['不记得见过道友。'],
+    nameKnown: ['道友自称{name}。'],
+    nameUnknown: ['道友未曾告知姓名。'],
+    giveYes: ['拿去。'],
+    giveNo: ['不可。'],
+    giveNone: ['没有。'],
+    outOfWorld: ['胡言乱语。此处不可喧哗。', '听不懂。'],
+    denyClaim: ['并无此事。', '道友记错了，我不曾应过。'],
+    deflect: ['此事不便多言。'],
+    ack: ['嗯。', '正是。'],
+    caredFor: ['无恙，多谢。'],
+    praised: ['不敢当。'],
+    crudeReact: ['此处不可喧哗。'],
+    rebuke: ['出言不逊，再这样就请回。'],
+    stormOff: ['请回。此处不欢迎你。'],
+    refuseTalk: ['请回。'],
+    greetCold: ['道友有何贵干？'],
+    greetColdStranger: ['道友何事。'],
+    rememberCold: ['记得。道友上回出言不逊。'],
+    openAccuse: ['听闻道友出言辱骂{person}。'],
+    openAccuseSaw: ['{when}道友辱骂{person}，在下看见了。'],
+    saidAlready: ['方才已经说过。'],
+    apologyAccepted: ['知道了。下不为例。'],
+    apologyCold: ['……知道了。'],
+    apologyAgain: ['已经听到了。'],
+    apologyElsewhere: ['此话应向{person}说。'],
+    apologyNone: ['无妨。'],
+    close: ['我该{reason}了，失陪。', '不便久留，我得{reason}。'],
+    closeGo: ['我得{reason}，告辞。'],
+    closeDuty: ['职责在身，失陪。', '当值要紧，失陪。'],
+    introduceAck: ['记下了。'],
+    openKnown: ['道友。'],
+    openRecall: ['道友。{when}你{memory}，在下记得。'],
+    openReturned: ['道友果然来了。'],
+  },
+  steady: {
+    greetStranger: ['道友有礼。初来山门？', '道友好。'],
+    greetKnown: ['道友，又见面了。', '道友来了。'],
+    greetBack: ['道友有礼。'],
+    farewell: ['道友慢走。', '后会有期。'],
+    thanks: ['不必客气。'],
+    activity: ['在{place}{activity}，修行不可懈怠。', '{activity}。'],
+    activityIdle: ['暂且歇息，稍后再修。'],
+    activityBreak: ['{breakFrom}间歇，调息片刻。'],
+    plan: ['{plan}，循序渐进罢了。'],
+    newsNone: ['山中无事。'],
+    newsNoMore: ['所知仅此。'],
+    newsTell: ['听说{news}。', '近来{news}。'],
+    personFriend: ['{person}与我交好。'],
+    personGood: ['{person}为人尚可。'],
+    personNeutral: ['{person}，泛泛之交。'],
+    personBad: ['{person}行事欠妥，常惹事端。'],
+    personGrudge: ['我与{person}有些龃龉，不便多言。'],
+    personAgain: ['前番说过，{base}'],
+    remember: ['记得，道友上回{memory}。'],
+    rememberNamed: ['记得，{name}道友。上回你{memory}。'],
+    rememberNone: ['恕我眼拙，道友是？'],
+    nameKnown: ['你说过，叫{name}。'],
+    nameUnknown: ['道友还没说过怎么称呼。'],
+    giveYes: ['此株赠予道友。'],
+    giveNo: ['此物另有用处，恕难相赠。'],
+    giveNone: ['我手中并无此物。'],
+    outOfWorld: ['道友所言，我闻所未闻。', '此等言语，莫非是练岔了气？'],
+    denyClaim: ['道友记错了，并无此约。'],
+    deflect: ['道友言重了。', '此事容我想想。'],
+    ack: ['嗯。', '正是如此。'],
+    caredFor: ['尚好，有劳挂念。'],
+    praised: ['道友过誉了。'],
+    crudeReact: ['道友，慎言。'],
+    rebuke: ['道友慎言。'],
+    stormOff: ['道不同，不相为谋。告辞。'],
+    refuseTalk: ['道友请自重，我与你无话可说。'],
+    greetCold: ['道友。'],
+    greetColdStranger: ['道友有事？'],
+    rememberCold: ['记得。道友上回言语无礼。'],
+    openAccuse: ['听闻道友与{person}起了口角。'],
+    openAccuseSaw: ['{when}你与{person}起了口角，我都看见了。'],
+    saidAlready: ['刚才说过了。'],
+    apologyAccepted: ['知错便好。', '道友能明白就好。'],
+    apologyCold: ['……罢了。'],
+    apologyAgain: ['道友已说过了。'],
+    apologyElsewhere: ['此事道友该向{person}致歉。'],
+    apologyNone: ['道友言重了。'],
+    close: ['我该{reason}了，道友自便。', '今日先到这里，我得{reason}。'],
+    closeGo: ['我得{reason}，先行一步。'],
+    introduceAck: ['我记下了。'],
+    openNews: ['道友可曾听说，{news}？'],
+    openKnown: ['道友。'],
+    openRecall: ['是你啊。{when}你{memory}，我还记着。'],
+    openReturned: ['你还真来了。'],
+    openNewcomer: ['初来山门，诸事可问我。'],
+  },
+  warm: {
+    greetStranger: ['道友好！新来的吧？有什么要帮忙的尽管说。', '你好呀！'],
+    greetKnown: ['你来啦！', '又见到你了，真好。'],
+    greetBack: ['你好呀！'],
+    farewell: ['好，回头见！', '慢走，有事叫我。'],
+    thanks: ['不客气不客气！', '能帮上忙就好。'],
+    activity: ['在{place}{activity}呢，有点累，不过还好。', '{activity}，忙完这阵就好了。'],
+    activityIdle: ['歇会儿呢，刚忙完。', '闲着呢，你有事？'],
+    activityBreak: ['刚{breakFrom}完一轮，歇会儿呢。'],
+    plan: ['明天{plan}。', '{plan}，你要是有事也可以找我。'],
+    newsNone: ['最近挺太平的。'],
+    newsNoMore: ['就这些啦，有新鲜的再跟你说！'],
+    newsTell: ['还有件事，{news}。', '对了，{news}。'],
+    newsTellBad: ['你听说了吗？{news}，唉。'],
+    personFriend: ['{person}是我好朋友！'],
+    personGood: ['{person}人可好了。'],
+    personNeutral: ['{person}啊，不太熟，不过应该不坏。'],
+    personBad: ['{person}……脾气不太好，你小心些。'],
+    personGrudge: ['我跟{person}闹了点不愉快，过阵子就好了。'],
+    personAgain: ['上回说过啦，{base}'],
+    remember: ['当然记得！上回你{memory}。'],
+    rememberNamed: ['当然记得！你是{name}嘛，上回你{memory}。', '{name}！当然记得，上回你{memory}。'],
+    rememberNone: ['咦，我们见过吗？'],
+    nameKnown: ['{name}嘛！你说过的，我记着呢。'],
+    nameUnknown: ['你还没说呢！怎么称呼？'],
+    giveYes: ['给，拿去用吧！'],
+    giveNo: ['这株我还有用，对不住！'],
+    giveNone: ['我手上没有，对不住！'],
+    outOfWorld: ['你说的我听不太懂……是累糊涂了吗？', '啊？这是什么？'],
+    denyClaim: ['咦？我好像没说过这个……是不是记错人啦？'],
+    deflect: ['啊？这个……', '嘿嘿，你这么一说我都不知道说什么好了。'],
+    ack: ['嗯嗯！', '对吧！'],
+    caredFor: ['我没事！谢谢你问！', '还好啦，你也歇歇。'],
+    praised: ['真的吗？嘿嘿，谢谢你！'],
+    crudeReact: ['怎、怎么了？'],
+    rebuke: ['你、你怎么骂人呀……', '别这样说话嘛……'],
+    stormOff: ['你……你太过分了！'],
+    refuseTalk: ['……你走吧，我不想理你。'],
+    greetCold: ['……你来了。'],
+    greetColdStranger: ['……嗯，你好。'],
+    rememberCold: ['记得的……上回你{memory}。'],
+    openAccuse: ['听说你跟{person}吵架了？怎么回事呀？'],
+    openAccuseSaw: ['{when}你跟{person}吵起来了，我都看见了！怎么回事呀？'],
+    saidAlready: ['刚说过啦！'],
+    apologyAccepted: ['没事啦，我不生气了……就是下次别这样了。', '好啦好啦，说开就好！'],
+    apologyCold: ['……嗯。'],
+    apologyAgain: ['知道啦知道啦。'],
+    apologyElsewhere: ['你去跟{person}说说吧，会好受些的。'],
+    apologyNone: ['没事没事！'],
+    close: ['哎呀，我得{reason}了，回头再聊！', '不跟你多说啦，我得{reason}，回聊！'],
+    closeGo: ['我先走啦，得{reason}，回头见！'],
+    introduceAck: ['好，记住啦！'],
+    openNews: ['道友道友，你听说了吗？{news}！'],
+    openKnown: ['你来啦！'],
+    openRecall: ['是你呀！{when}你{memory}，我可还记着呢！'],
+    openReturned: ['哈，说来就来了！'],
+    openNewcomer: ['新来的吧？哪儿不认得就问我！'],
+  },
+};

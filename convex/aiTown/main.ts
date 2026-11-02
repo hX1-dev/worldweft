@@ -1,5 +1,12 @@
 import { ConvexError, v } from 'convex/values';
-import { DatabaseReader, MutationCtx, internalAction, mutation, query } from '../_generated/server';
+import {
+  DatabaseReader,
+  MutationCtx,
+  internalAction,
+  internalQuery,
+  mutation,
+  query,
+} from '../_generated/server';
 import { insertInput } from './insertInput';
 import { Game } from './game';
 import { internal } from '../_generated/api';
@@ -29,7 +36,8 @@ async function loadWorldStatus(db: DatabaseReader, worldId: Id<'worlds'>) {
 }
 
 export async function startEngine(ctx: MutationCtx, worldId: Id<'worlds'>) {
-  const { engineId } = await loadWorldStatus(ctx.db, worldId);
+  const worldStatus = await loadWorldStatus(ctx.db, worldId);
+  const { engineId } = worldStatus;
   const engine = await ctx.db.get(engineId);
   if (!engine) {
     throw new Error(`Invalid engine ID: ${engineId}`);
@@ -57,7 +65,8 @@ export async function startEngine(ctx: MutationCtx, worldId: Id<'worlds'>) {
 }
 
 export async function kickEngine(ctx: MutationCtx, worldId: Id<'worlds'>) {
-  const { engineId } = await loadWorldStatus(ctx.db, worldId);
+  const worldStatus = await loadWorldStatus(ctx.db, worldId);
+  const { engineId } = worldStatus;
   const engine = await ctx.db.get(engineId);
   if (!engine) {
     throw new Error(`Invalid engine ID: ${engineId}`);
@@ -75,7 +84,8 @@ export async function kickEngine(ctx: MutationCtx, worldId: Id<'worlds'>) {
 }
 
 export async function stopEngine(ctx: MutationCtx, worldId: Id<'worlds'>) {
-  const { engineId } = await loadWorldStatus(ctx.db, worldId);
+  const worldStatus = await loadWorldStatus(ctx.db, worldId);
+  const { engineId } = worldStatus;
   const engine = await ctx.db.get(engineId);
   if (!engine) {
     throw new Error(`Invalid engine ID: ${engineId}`);
@@ -86,6 +96,26 @@ export async function stopEngine(ctx: MutationCtx, worldId: Id<'worlds'>) {
   await ctx.db.patch(engineId, { running: false });
 }
 
+export const loadGenericWorldForRunStep = internalQuery({
+  args: {
+    worldId: v.id('worlds'),
+    generationNumber: v.number(),
+  },
+  handler: async (ctx, args) => {
+    const worldStatus = await loadWorldStatus(ctx.db, args.worldId);
+    const currentEngine = await ctx.db.get(worldStatus.engineId);
+    if (!currentEngine) {
+      throw new Error(`Invalid engine ID: ${worldStatus.engineId}`);
+    }
+    const { engine, gameState } = await Game.load(
+      ctx.db,
+      args.worldId,
+      args.generationNumber,
+    );
+    return { engine, gameState };
+  },
+});
+
 export const runStep = internalAction({
   args: {
     worldId: v.id('worlds'),
@@ -94,10 +124,14 @@ export const runStep = internalAction({
   },
   handler: async (ctx, args) => {
     try {
-      const { engine, gameState } = await ctx.runQuery(internal.aiTown.game.loadWorld, {
-        worldId: args.worldId,
-        generationNumber: args.generationNumber,
-      });
+      const loaded = await ctx.runQuery(
+        internal.aiTown.main.loadGenericWorldForRunStep,
+        {
+          worldId: args.worldId,
+          generationNumber: args.generationNumber,
+        },
+      );
+      const { engine, gameState } = loaded;
       const game = new Game(engine, args.worldId, gameState);
 
       let now = Date.now();
@@ -115,11 +149,16 @@ export const runStep = internalAction({
       });
     } catch (e: unknown) {
       if (e instanceof ConvexError) {
-        if (e.data.kind === 'engineNotRunning') {
+        const data = e.data as unknown;
+        const kind =
+          data && typeof data === 'object' && 'kind' in data
+            ? (data as { kind?: unknown }).kind
+            : undefined;
+        if (kind === 'engineNotRunning') {
           console.debug(`Engine is not running: ${e.message}`);
           return;
         }
-        if (e.data.kind === 'generationNumber') {
+        if (kind === 'generationNumber') {
           console.debug(`Generation number mismatch: ${e.message}`);
           return;
         }

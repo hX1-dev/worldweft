@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 
+import { existsSync, readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { ConvexHttpClient } from 'convex/browser';
 import { api } from '../../convex/_generated/api.js';
 import {
@@ -12,7 +14,7 @@ import {
 
 const baseUrl = (process.env.GODOT_BRIDGE_URL ?? 'http://127.0.0.1:3211').replace(/\/$/, '');
 const convexUrl = process.env.GODOT_CONVEX_URL ?? defaultConvexUrlForBridge(baseUrl);
-const debugToken = process.env.GODOT_BRIDGE_DEBUG_TOKEN?.trim();
+let debugToken = process.env.GODOT_BRIDGE_DEBUG_TOKEN?.trim() ?? '';
 const contractVersion = 'godot_bridge_v1';
 const mapId = process.env.GODOT_MAP_ID ?? 'qinglan';
 const config = readAgentSoakConfig();
@@ -22,6 +24,25 @@ const delayMs = config.delayMs;
 const contextActorLimit = config.contextActors;
 const budget = new AgentSoakBudget(config);
 const convexClient = new ConvexHttpClient(convexUrl);
+
+if (!debugToken) {
+  const root = resolve(import.meta.dirname, '../..');
+  const configPath = resolve(root, '.convex/local/default/config.json');
+  if (existsSync(configPath)) {
+    const localConfig = JSON.parse(readFileSync(configPath, 'utf8'));
+    const secretClient = new ConvexHttpClient(
+      `http://127.0.0.1:${Number(localConfig.ports?.cloud ?? 3210)}`,
+    );
+    secretClient.setAdminAuth(localConfig.adminKey);
+    debugToken = String(
+      (
+        await secretClient.query('_system/cli/queryEnvironmentVariables:get', {
+          name: 'GODOT_BRIDGE_DEBUG_TOKEN',
+        })
+      )?.value ?? '',
+    ).trim();
+  }
+}
 
 if (!debugToken) {
   throw new Error('GODOT_BRIDGE_DEBUG_TOKEN is required for the agent soak check.');
@@ -644,6 +665,129 @@ function assertTickScheduler(tick, tickResults, tickNumber) {
   return scheduler;
 }
 
+function assertAutonomyDecisionTrace(
+  result,
+  tickNumber,
+  resultIndex,
+  seenDecisionTraces,
+  decisionSourceCounts,
+) {
+  const actorId = String(result?.actorId ?? '');
+  // C017a–C017c cover the world/qinglan life planners. The valley
+  // movement experiment keeps its separate movement command trace.
+  if (actorId.startsWith('qinglan_valley_gate:')) return false;
+  const label = `tick ${tickNumber}.results[${resultIndex}].decisionTrace`;
+  const trace = asObject(result?.decisionTrace, label);
+  assert(
+    trace.contractVersion === 'taixu.autonomy-decision.v3',
+    `${label} contractVersion must match`,
+  );
+  assert(trace.actorId === actorId, `${label} actorId must match result`);
+  assert(
+    typeof trace.observationRevision === 'string' && trace.observationRevision.length > 0,
+    `${label} must include observationRevision`,
+  );
+  assert(
+    typeof trace.decisionId === 'string' &&
+      trace.decisionId.includes(actorId) &&
+      trace.decisionId.endsWith(trace.observationRevision),
+    `${label} decisionId must bind actor and observation revision`,
+  );
+  const candidates = asArray(trace.candidates, `${label}.candidates`);
+  const survivalEnvelope = asObject(
+    trace.survivalEnvelope,
+    `${label}.survivalEnvelope`,
+  );
+  assert(
+    Number.isFinite(survivalEnvelope.urgency) &&
+      survivalEnvelope.urgency >= 0 &&
+      survivalEnvelope.urgency <= 100,
+    `${label} survival urgency must be bounded`,
+  );
+  asArray(survivalEnvelope.reasonCodes, `${label}.survivalEnvelope.reasonCodes`);
+  const personaPolicy = asObject(trace.personaPolicy, `${label}.personaPolicy`);
+  assert(
+    personaPolicy.policyVersion === 'taixu.persona-policy.v1',
+    `${label} persona policy version must match`,
+  );
+  assert(
+    typeof personaPolicy.policyDigest === 'string' &&
+      personaPolicy.policyDigest.length > 0,
+    `${label} persona policy must include a digest`,
+  );
+  asArray(personaPolicy.reasonCodes, `${label}.personaPolicy.reasonCodes`);
+  asArray(trace.exceptionSourceIds, `${label}.exceptionSourceIds`);
+  for (const candidate of candidates) {
+    assert(
+      Number.isFinite(candidate?.survivalUrgency) &&
+        candidate.survivalUrgency >= 0 &&
+        candidate.survivalUrgency <= 100,
+      `${label} candidate survival urgency must be bounded`,
+    );
+    asArray(candidate?.survivalReasonCodes, `${label}.candidate.survivalReasonCodes`);
+    for (const [field, value] of [
+      ['needScore', candidate?.needScore],
+      ['personaFit', candidate?.personaFit],
+      ['commitmentUrgency', candidate?.commitmentUrgency],
+    ]) {
+      assert(
+        Number.isFinite(value) && value >= -100 && value <= 100,
+        `${label} candidate ${field} must be finite and bounded`,
+      );
+    }
+    asArray(candidate?.personaReasonCodes, `${label}.candidate.personaReasonCodes`);
+    asArray(candidate?.relationshipReasons, `${label}.candidate.relationshipReasons`);
+    asArray(candidate?.memorySourceIds, `${label}.candidate.memorySourceIds`);
+  }
+  const bounds = asObject(trace.bounds, `${label}.bounds`);
+  assert(bounds.limit === 32, `${label} candidate limit must be 32`);
+  assert(candidates.length === bounds.included, `${label} included count must match`);
+  assert(candidates.length <= bounds.limit, `${label} candidates must stay bounded`);
+  assert(bounds.total >= bounds.included, `${label} total must cover included candidates`);
+  assert(
+    bounds.truncated === (bounds.total > bounds.included),
+    `${label} truncated flag must match counts`,
+  );
+  if (result?.proposal) {
+    assert(trace.outcome === 'chosen', `${label} proposal result must be chosen`);
+    assert(
+      candidates.some((candidate) => candidate?.candidateId === trace.chosenCandidateId),
+      `${label} chosenCandidateId must be included`,
+    );
+  } else {
+    assert(trace.outcome === 'idle', `${label} skipped result must be idle`);
+    assert(
+      trace.idleReasonCode === result?.skipped,
+      `${label} idleReasonCode must preserve the real skip reason`,
+    );
+  }
+  const semantic = JSON.stringify({ ...trace, createdAt: undefined });
+  const prior = seenDecisionTraces.get(trace.decisionId);
+  if (prior) {
+    assert(prior === semantic, `${label} same revision must replay byte-stable semantics`);
+    assert(result?.decisionTraceReplay === true, `${label} repeated revision must be marked replay`);
+  } else {
+    seenDecisionTraces.set(trace.decisionId, semantic);
+  }
+  assert(
+    typeof result?.decisionTraceId === 'string' && result.decisionTraceId.length > 0,
+    `${label} must expose persisted trace id`,
+  );
+  const source = String(trace.decisionSource ?? '');
+  decisionSourceCounts.set(source, (decisionSourceCounts.get(source) ?? 0) + 1);
+  assert(
+    result?.providerAttempted !== true,
+    `${label} provider=0 soak must not attempt an external model call`,
+  );
+  if (source === 'fallback') {
+    assert(
+      result?.providerAttempted === false && trace.exceptionReason === 'provider_disabled',
+      `${label} fallback must be the explicit provider-disabled path`,
+    );
+  }
+  return true;
+}
+
 console.log(
   `Checking Godot agent soak at ${baseUrl} for map ${mapId} (${iterations} tick(s), limit ${tickLimit}, runtime budget ${config.maxRuntimeMs}ms)`,
 );
@@ -680,9 +824,13 @@ let addedEventCount = 0;
 let relationshipEffectCount = 0;
 let relationshipDeltaMagnitude = 0;
 let relationshipDimensionsChanged = 0;
+let autonomyDecisionTraceCount = 0;
+let autonomyDecisionTraceReplayCount = 0;
 let schedulerEligibleCount = null;
 const durableEventsByActor = new Map();
 const scheduledActorIds = new Set();
+const seenDecisionTraces = new Map();
+const autonomyDecisionSourceCounts = new Map();
 const baselineContexts = new Map();
 const initialContextActorIds = residents
   .map((resident) => resident?.actorId)
@@ -721,6 +869,20 @@ for (let index = 0; index < iterations; index += 1) {
     `tick ${tickNumber} must not select Godot-controlled actors`,
   );
   const scheduler = assertTickScheduler(tick.tick, tickResults, tickNumber);
+  for (const [resultIndex, result] of tickResults.entries()) {
+    if (
+      assertAutonomyDecisionTrace(
+        result,
+        tickNumber,
+        resultIndex,
+        seenDecisionTraces,
+        autonomyDecisionSourceCounts,
+      )
+    ) {
+      autonomyDecisionTraceCount += 1;
+      if (result?.decisionTraceReplay === true) autonomyDecisionTraceReplayCount += 1;
+    }
+  }
   if (schedulerEligibleCount === null) schedulerEligibleCount = scheduler.eligibleCount;
   for (const actorId of scheduler.actorIds) scheduledActorIds.add(actorId);
   const tickEvents = asArray(tick.tickEvents, `tick ${tickNumber}.tickEvents`);
@@ -852,7 +1014,11 @@ if (config.requireRelationshipDelta) {
   );
 }
 const artifactSummary = budget.summary();
+const autonomyDecisionSources = [...autonomyDecisionSourceCounts.entries()]
+  .sort(([left], [right]) => left.localeCompare(right))
+  .map(([source, count]) => `${source}:${count}`)
+  .join(',');
 
 console.log(
-  `Godot agent soak check passed: ${iterations} tick(s), ${scheduledActorIds.size}/${schedulerEligibleCount ?? 0} scheduled actor(s), ${actionRecordReadbackCount} actionRecord readback(s), ${tickOnlyCount} tickOnly observation(s), ${actorContextReadbackCount} actorContext readback(s), ${memoryReadbackCount} memory row(s), ${addedMemoryCount} new memory id(s), ${addedActionCount} new context action(s), ${addedEventCount} new context event(s), ${relationshipEffectCount} relationship effect(s) (magnitude ${relationshipDeltaMagnitude}, visible dimension changes ${relationshipDimensionsChanged}), ${residentChangeCount} visible resident-change pass(es), ${artifactSummary.requestCount} HTTP response(s) / ${artifactSummary.responseBytes} byte(s) in ${artifactSummary.elapsedMs}ms.`,
+  `Godot agent soak check passed: ${iterations} tick(s), ${scheduledActorIds.size}/${schedulerEligibleCount ?? 0} scheduled actor(s), ${autonomyDecisionTraceCount} autonomy trace(s) (${autonomyDecisionTraceReplayCount} replay(s), sources ${autonomyDecisionSources || 'none'}, providerCalls=0), ${actionRecordReadbackCount} actionRecord readback(s), ${tickOnlyCount} tickOnly observation(s), ${actorContextReadbackCount} actorContext readback(s), ${memoryReadbackCount} memory row(s), ${addedMemoryCount} new memory id(s), ${addedActionCount} new context action(s), ${addedEventCount} new context event(s), ${relationshipEffectCount} relationship effect(s) (magnitude ${relationshipDeltaMagnitude}, visible dimension changes ${relationshipDimensionsChanged}), ${residentChangeCount} visible resident-change pass(es), ${artifactSummary.requestCount} HTTP response(s) / ${artifactSummary.responseBytes} byte(s) in ${artifactSummary.elapsedMs}ms.`,
 );

@@ -1,4 +1,8 @@
-import { actionIdempotencyFingerprint, stableJson } from './actionIdempotency';
+import {
+  actionIdempotencyFingerprint,
+  agentActionClientId,
+  stableJson,
+} from './actionIdempotency';
 
 describe('action idempotency contract', () => {
   test('canonicalizes semantic params independently of object key order', () => {
@@ -44,6 +48,91 @@ describe('action idempotency contract', () => {
   test('stableJson preserves array order and sorts object keys', () => {
     expect(stableJson({ z: [2, 1], a: { d: 4, c: 3 } })).toBe(
       '{"a":{"c":3,"d":4},"z":[2,1]}',
+    );
+  });
+
+  test('use_item fingerprint binds the selected inventory item and self-only shape', () => {
+    const base = {
+      type: 'use_item',
+      actorId: 'player',
+      source: 'human',
+      params: { itemId: 'healing_pill' },
+      metadata: { mapId: 'qinglan' },
+    };
+    expect(actionIdempotencyFingerprint(base)).not.toBe(
+      actionIdempotencyFingerprint({ ...base, params: { itemId: 'qi_pill' } }),
+    );
+    expect(actionIdempotencyFingerprint(base)).not.toBe(
+      actionIdempotencyFingerprint({ ...base, targetActorId: 'player' }),
+    );
+  });
+
+  test('gather fingerprint binds the selected finite resource node', () => {
+    const base = {
+      type: 'gather',
+      actorId: 'player',
+      locationId: 'herb_patch',
+      source: 'human',
+      params: { resourceNodeId: 'dew_patch_a' },
+      metadata: { mapId: 'xianxia_system_lab' },
+    };
+    expect(actionIdempotencyFingerprint(base)).not.toBe(
+      actionIdempotencyFingerprint({
+        ...base,
+        params: { resourceNodeId: 'dew_patch_b' },
+      }),
+    );
+  });
+
+  test('cultivate fingerprint binds the selected resource mode', () => {
+    const base = {
+      type: 'cultivate',
+      actorId: 'player',
+      locationId: 'cultivation_pad',
+      source: 'human',
+      params: { cultivationMode: 'ambient' },
+      metadata: { mapId: 'xianxia_system_lab' },
+    };
+    expect(actionIdempotencyFingerprint(base)).not.toBe(
+      actionIdempotencyFingerprint({
+        ...base,
+        params: { cultivationMode: 'spirit_stone' },
+      }),
+    );
+  });
+
+  test('agent action keys bind actor suffixes beyond the old truncation boundary', () => {
+    const sharedActorPrefix = `disciple:${'a'.repeat(140)}`;
+    const turnId = 'pi-npc:turn:fixed';
+    const left = agentActionClientId(turnId, `${sharedActorPrefix}:east`);
+    const right = agentActionClientId(turnId, `${sharedActorPrefix}:west`);
+
+    expect(left).not.toBe(right);
+    expect(left).toMatch(/^agent:turn:v2:[0-9a-f]{32}$/);
+    expect(left.length).toBeLessThan(64);
+  });
+
+  test('agent action keys preserve the exact legacy shape when no truncation occurred', () => {
+    expect(agentActionClientId('pi-npc:turn:7', 'disciple:a')).toBe(
+      'agent:pi-npc:turn:7:disciple:a',
+    );
+  });
+
+  test('agent action keys bind the full turn revision instead of its first 96 characters', () => {
+    const sharedTurnPrefix = `pi-npc:${'turn'.repeat(40)}`;
+    const actorId = `long-actor:${'x'.repeat(120)}`;
+    const revisionOne = agentActionClientId(
+      `${sharedTurnPrefix}:revision:1`,
+      actorId,
+    );
+    const revisionTwo = agentActionClientId(
+      `${sharedTurnPrefix}:revision:2`,
+      actorId,
+    );
+
+    expect(revisionOne).not.toBe(revisionTwo);
+    expect(agentActionClientId(`${sharedTurnPrefix}:revision:1`, actorId)).toBe(
+      revisionOne,
     );
   });
 });

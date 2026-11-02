@@ -9,10 +9,25 @@ func _init() -> void:
 
 func _run() -> void:
 	_assert(ActionMenuPolicyScript.is_target_action("talk"), "talk is a target action")
+	_assert(ActionMenuPolicyScript.is_target_action("attack"), "attack is a target action")
+	_assert(ActionMenuPolicyScript.is_target_action("loot"), "loot is a target action")
+	_assert(ActionMenuPolicyScript.is_target_action("accept_request"), "request acceptance is a target action")
+	_assert(ActionMenuPolicyScript.is_target_action("turn_in_request"), "request turn-in is a target action")
 	_assert(not ActionMenuPolicyScript.is_target_action("cultivate"), "cultivate is not a target action")
 	_assert(ActionMenuPolicyScript.is_location_action("breakthrough"), "breakthrough is a location action")
+	_assert(ActionMenuPolicyScript.is_self_action("use_item"), "use_item is a self action")
+	_assert(ActionMenuPolicyScript.is_self_action("flee"), "flee is a self action")
 	_assert(ActionMenuPolicyScript.requires_confirmation({ "type": "trade" }), "trade requires confirmation")
+	_assert(ActionMenuPolicyScript.requires_confirmation({ "type": "use_item" }), "using a scarce healing item requires confirmation")
+	_assert(ActionMenuPolicyScript.requires_confirmation({ "type": "attack" }), "hostile attack requires confirmation")
+	_assert(ActionMenuPolicyScript.requires_confirmation({ "type": "loot" }), "loot requires confirmation")
+	_assert(ActionMenuPolicyScript.requires_confirmation({ "type": "flee" }), "flee requires confirmation")
+	_assert(ActionMenuPolicyScript.requires_confirmation({ "type": "decline_request" }), "request decline requires confirmation")
 	_assert(not ActionMenuPolicyScript.requires_confirmation({ "type": "talk" }), "talk does not require confirmation")
+	var self_action := ActionMenuPolicyScript.local_availability(
+		{ "type": "use_item", "category": "self" }, false, INF, false, 5.0
+	)
+	_assert(self_action.get("enabled", false) == true, "self action does not require a resident or location")
 
 	var no_target := ActionMenuPolicyScript.local_availability(
 		{ "type": "gift", "category": "target" }, false, INF, true, 5.0

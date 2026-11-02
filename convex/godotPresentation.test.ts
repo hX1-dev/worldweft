@@ -73,6 +73,39 @@ describe('godotPresentation', () => {
     expect(godotSettlementPreview({ items: [] })).toBeUndefined();
   });
 
+  test('shows the effective healing delta together with the consumed item', () => {
+    const preview = godotSettlementPreview({
+      health: 1,
+      items: [{ from: 'godot_player', itemId: 'healing_pill', qty: 1 }],
+    });
+    expect(preview).toMatchObject({
+      durableSource: 'rules.effects',
+      healthDelta: 1,
+      transfers: [{ itemId: 'healing_pill', qty: 1 }],
+    });
+    expect(preview?.summary).toContain('You -1: 疗伤丹 x1');
+    expect(preview?.summary).toContain('Health +1');
+  });
+
+  test.each([
+    'unknown_item',
+    'item_not_healing',
+    'health_already_full',
+    'use_item_self_only',
+    'actor_incapacitated',
+  ])('renders event-only use_item rejection %s as a warning', (resultCode) => {
+    expect(
+      godotEventPresentation({
+        actionType: 'use_item',
+        resultCode,
+        summary: `服药被拒绝：${resultCode}`,
+      }),
+    ).toMatchObject({
+      bubbleKind: 'warning',
+      durableSummary: `服药被拒绝：${resultCode}`,
+    });
+  });
+
   test('LLM polish preview cannot create facts or write durable state', () => {
     const preview = godotPresentationPolishPreview({
       actionType: 'trade',

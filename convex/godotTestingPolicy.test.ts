@@ -16,7 +16,8 @@ describe('Godot testing fixture policy', () => {
   });
 
   test('keeps cleanup work in bounded ordered phases', () => {
-    expect(nextGodotSmokeCleanupPhase('profile')).toBe('relationships_from');
+    expect(nextGodotSmokeCleanupPhase('profile')).toBe('personal_goals');
+    expect(nextGodotSmokeCleanupPhase('personal_goals')).toBe('relationships_from');
     expect(nextGodotSmokeCleanupPhase('relationships_from')).toBe('relationships_to');
     expect(nextGodotSmokeCleanupPhase('relationships_to')).toBe('memories');
     expect(nextGodotSmokeCleanupPhase('memories')).toBe('requests_assignee');

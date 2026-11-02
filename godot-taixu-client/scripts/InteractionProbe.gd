@@ -11,3 +11,4 @@ func select_resident(resident: Dictionary) -> void:
 
 func has_selection() -> bool:
 	return not selected_resident.is_empty()
+

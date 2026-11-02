@@ -6,6 +6,7 @@ export function assertGodotSmokeActorId(actorId: string, operation: string) {
 
 export const GODOT_SMOKE_CLEANUP_PHASES = [
   'profile',
+  'personal_goals',
   'relationships_from',
   'relationships_to',
   'memories',

@@ -1,15 +1,19 @@
 extends RefCounted
 class_name ActionMenuPolicy
 
-const TARGET_ACTIONS := ["talk", "trade", "gift", "request_teaching", "spar", "steal"]
+const TARGET_ACTIONS := ["talk", "trade", "gift", "request_teaching", "accept_request", "decline_request", "turn_in_request", "spar", "steal", "attack", "loot"]
 const LOCATION_ACTIONS := ["arrive", "explore", "cultivate", "breakthrough"]
-const CONFIRMATION_ACTIONS := ["trade", "gift", "request_teaching", "spar", "steal", "breakthrough"]
+const SELF_ACTIONS := ["use_item", "flee"]
+const CONFIRMATION_ACTIONS := ["trade", "gift", "request_teaching", "accept_request", "decline_request", "turn_in_request", "spar", "steal", "attack", "loot", "flee", "breakthrough", "use_item"]
 
 static func is_target_action(action_type: String) -> bool:
 	return TARGET_ACTIONS.has(action_type)
 
 static func is_location_action(action_type: String) -> bool:
 	return LOCATION_ACTIONS.has(action_type)
+
+static func is_self_action(action_type: String) -> bool:
+	return SELF_ACTIONS.has(action_type)
 
 static func requires_confirmation(capability: Dictionary) -> bool:
 	return CONFIRMATION_ACTIONS.has(str(capability.get("type", "")))
@@ -23,6 +27,8 @@ static func local_availability(
 ) -> Dictionary:
 	var action_type := str(capability.get("type", ""))
 	var category := str(capability.get("category", ""))
+	if category == "self" or is_self_action(action_type):
+		return { "enabled": true, "reason": "" }
 	if category == "target" or is_target_action(action_type):
 		if not has_selected_resident:
 			return { "enabled": false, "reason": "Select a resident." }

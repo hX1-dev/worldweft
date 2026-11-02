@@ -5,17 +5,33 @@ import { Infer, v } from 'convex/values';
 // 供 schema.ts（建表）、actions.ts（resolver）、rules.ts（纯规则）共用，避免各处散落。
 // 依据：docs/xianxia-blueprint.md §8（动作系统）、§12（事件可见性）。
 
-// 第一阶段 8 个 MVP 动作 + travel/arrive（移动/抵达也纳入统一类型便于记录）。
+// 第一阶段普通动作 + travel/arrive；recover 是经计时校验的系统生命流程。
 export const actionType = v.union(
   v.literal('cultivate'),
+  v.literal('gather'),
+  v.literal('rest'),
   v.literal('talk'),
+  v.literal('invite_social'),
+  v.literal('respond_social_invitation'),
+  v.literal('group_talk'),
+  v.literal('group_decide'),
+  v.literal('negotiate'),
   v.literal('trade'),
   v.literal('gift'),
   v.literal('request_teaching'),
+  v.literal('accept_request'),
+  v.literal('decline_request'),
+  v.literal('turn_in_request'),
   v.literal('spar'),
+  v.literal('attack'),
+  v.literal('flee'),
+  v.literal('loot'),
   v.literal('explore'),
+  v.literal('inspect'),
   v.literal('steal'),
   v.literal('breakthrough'),
+  v.literal('use_item'),
+  v.literal('recover'),
   v.literal('travel'),
   v.literal('arrive'),
 );
@@ -81,12 +97,19 @@ export const actionEnvelopeArgs = {
 export type RelationshipDelta = { targetActorId: string; delta: number };
 // 物品转移：from→to 移动 itemId×qty。缺 from 表示凭空产出（如探索机缘），
 // 缺 to 表示消耗。第一阶段动作只用 from+to 的转移。
-export type ItemTransfer = { from?: string; to?: string; itemId: string; qty: number };
+export type ItemTransfer = {
+  from?: string;
+  to?: string;
+  itemId: string;
+  qty: number;
+  sourceResourceNodeId?: string;
+};
 export type LocationChange = {
   fromMapId?: string;
   fromLocationId?: string;
   toMapId: string;
   toLocationId: string;
+  toTile?: { x: number; y: number };
   intent?: string;
 };
 // 境界变更（仅突破用，绝对值覆盖）。境界提升是 cultivationXp 累积的最终兑现。
@@ -95,11 +118,17 @@ export type Effects = {
   cultivationXp?: number;
   mood?: number;
   health?: number;
+  fatigue?: number;
   spirit?: number;
   reputation?: number;
   relationships?: RelationshipDelta[];
   items?: ItemTransfer[];
   realmChange?: RealmChange;
+  breakthroughProgress?: {
+    realmEnteredAt?: number;
+    recoveryUntil?: number;
+    clearRecovery?: boolean;
+  };
   locationChange?: LocationChange;
 };
 

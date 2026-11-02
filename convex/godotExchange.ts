@@ -1,5 +1,10 @@
-import { itemBaseValue, itemName } from './xianxia/items';
+import { healingAmount, itemBaseValue, itemName } from './xianxia/items';
 import { quotePrice } from './xianxia/priceLogic';
+import {
+  quoteShopPurchase,
+  quoteShopSale,
+  type ShopState,
+} from './xianxia/shopLogic';
 
 export type InventoryItem = { itemId: string; qty: number };
 
@@ -38,6 +43,54 @@ export function buildGiftOptions(actorInventory: InventoryItem[], targetInventor
             'actionRecords row',
             'worldEvents row',
             'possible relationship and memory updates',
+          ],
+        }),
+      };
+    });
+}
+
+export function buildHealingItemOptions(
+  actorInventory: InventoryItem[],
+  currentHealth: number,
+  maxHealth: number,
+) {
+  const boundedMax = Math.max(1, maxHealth);
+  const boundedHealth = Math.max(0, Math.min(boundedMax, currentHealth));
+  return actorInventory
+    .filter((item) => item.qty > 0 && healingAmount(item.itemId) !== null)
+    .slice(0, 6)
+    .map((item) => {
+      const healValue = healingAmount(item.itemId)!;
+      const effectiveHeal = Math.max(0, Math.min(healValue, boundedMax - boundedHealth));
+      const inventoryPreview = inventoryDeltaPreview([
+        {
+          owner: 'actor',
+          itemId: item.itemId,
+          before: item.qty,
+          delta: -1,
+        },
+      ]);
+      return {
+        label: `${itemName(item.itemId)} x1 · +${effectiveHeal} health`,
+        params: { itemId: item.itemId },
+        itemId: item.itemId,
+        itemName: itemName(item.itemId),
+        qtyAvailable: item.qty,
+        healValue,
+        effectiveHeal,
+        currentHealth: boundedHealth,
+        maxHealth: boundedMax,
+        inventoryDeltaPreview: inventoryPreview,
+        confirmationPreview: confirmationPreview({
+          actionType: 'use_item',
+          summary: `Use ${itemName(item.itemId)} x1 to restore ${effectiveHeal} health.`,
+          primaryLine: `Consume ${itemName(item.itemId)} x1.`,
+          balanceLine: `Health ${boundedHealth} -> ${boundedHealth + effectiveHeal}/${boundedMax}.`,
+          inventoryPreview,
+          durableEffectNotes: [
+            'actionRecords row',
+            'private worldEvents row',
+            'inventory -1 and effective health delta resolved atomically by Convex',
           ],
         }),
       };
@@ -160,6 +213,162 @@ export function buildTradeOptions(
     .slice(0, 6);
 }
 
+export function buildShopTradeOptions(
+  actorInventory: InventoryItem[],
+  shop: ShopState,
+  sellerView: { affinity: number; trust: number; suspicion: number; tags?: string[] },
+) {
+  const spiritStones = inventoryQty(actorInventory, 'spirit_stone');
+  const buy = shop.stock.flatMap((line) => {
+    if (line.qty <= 0 || itemBaseValue(line.itemId) <= 0) return [];
+    const quote = quoteShopSale(line.itemId, line.qty, line.capacity, sellerView);
+    const quantityChoices = tradeQuantityChoices(line.qty, spiritStones, quote.finalPrice);
+    return quantityChoices.map((requestedQty) => {
+      const totalPrice = quote.finalPrice * requestedQty;
+      const inventoryPreview = inventoryDeltaPreview([
+        { owner: 'actor', itemId: 'spirit_stone', before: spiritStones, delta: -totalPrice },
+        {
+          owner: 'actor',
+          itemId: line.itemId,
+          before: inventoryQty(actorInventory, line.itemId),
+          delta: requestedQty,
+        },
+        { owner: 'shop', itemId: line.itemId, before: line.qty, delta: -requestedQty },
+      ]);
+      const exchangeTerms = [
+        {
+          from: 'actor' as const,
+          to: 'shop' as const,
+          itemId: 'spirit_stone',
+          itemName: itemName('spirit_stone'),
+          qty: totalPrice,
+        },
+        {
+          from: 'shop' as const,
+          to: 'actor' as const,
+          itemId: line.itemId,
+          itemName: itemName(line.itemId),
+          qty: requestedQty,
+        },
+      ];
+      return {
+        label: `Buy ${itemName(line.itemId)} x${requestedQty} · ${totalPrice} 灵石`,
+        direction: 'buy' as const,
+        params: {
+          offeredItemId: 'spirit_stone',
+          offeredQty: totalPrice,
+          requestedItemId: line.itemId,
+          requestedQty,
+        },
+        itemId: line.itemId,
+        qty: requestedQty,
+        priceSpiritStones: totalPrice,
+        unitPriceSpiritStones: quote.finalPrice,
+        quote,
+        shop: shopSummary(shop, line.itemId),
+        exchangeTerms,
+        inventoryDeltaPreview: inventoryPreview,
+        confirmationPreview: confirmationPreview({
+          actionType: 'trade',
+          summary: `Buy ${itemName(line.itemId)} x${requestedQty} for ${totalPrice} spirit stone(s).`,
+          primaryLine: `${shop.name}: ${itemName(line.itemId)} x${requestedQty}.`,
+          balanceLine: `Balance ${spiritStones} -> ${spiritStones - totalPrice}; shop stock ${line.qty} -> ${line.qty - requestedQty}.`,
+          exchangeTerms,
+          inventoryPreview,
+          durableEffectNotes: [
+            'actionRecords row',
+            'worldEvents row with shop stock and wallet facts',
+            `restock source ${shop.restockSourceId}`,
+            'actor inventory and shop state settle atomically in Convex',
+          ],
+        }),
+      };
+    });
+  });
+  const sell = shop.stock.flatMap((line) => {
+    const owned = inventoryQty(actorInventory, line.itemId);
+    if (owned <= 0 || line.qty >= line.capacity || itemBaseValue(line.itemId) <= 0) return [];
+    const quote = quoteShopPurchase(line.itemId, line.qty, line.capacity);
+    if (quote.finalPrice <= 0 || shop.walletSpiritStones < quote.finalPrice) return [];
+    const inventoryPreview = inventoryDeltaPreview([
+      { owner: 'actor', itemId: line.itemId, before: owned, delta: -1 },
+      {
+        owner: 'actor',
+        itemId: 'spirit_stone',
+        before: spiritStones,
+        delta: quote.finalPrice,
+      },
+      { owner: 'shop', itemId: line.itemId, before: line.qty, delta: 1 },
+    ]);
+    const exchangeTerms = [
+      {
+        from: 'actor' as const,
+        to: 'shop' as const,
+        itemId: line.itemId,
+        itemName: itemName(line.itemId),
+        qty: 1,
+      },
+      {
+        from: 'shop' as const,
+        to: 'actor' as const,
+        itemId: 'spirit_stone',
+        itemName: itemName('spirit_stone'),
+        qty: quote.finalPrice,
+      },
+    ];
+    return [
+      {
+        label: `Sell ${itemName(line.itemId)} x1 · ${quote.finalPrice} 灵石`,
+        direction: 'sell' as const,
+        params: {
+          offeredItemId: line.itemId,
+          offeredQty: 1,
+          requestedItemId: 'spirit_stone',
+          requestedQty: quote.finalPrice,
+        },
+        itemId: line.itemId,
+        qty: 1,
+        priceSpiritStones: quote.finalPrice,
+        unitPriceSpiritStones: quote.finalPrice,
+        quote,
+        shop: shopSummary(shop, line.itemId),
+        exchangeTerms,
+        inventoryDeltaPreview: inventoryPreview,
+        confirmationPreview: confirmationPreview({
+          actionType: 'trade',
+          summary: `Sell ${itemName(line.itemId)} x1 for ${quote.finalPrice} spirit stone(s).`,
+          primaryLine: `${shop.name} buys ${itemName(line.itemId)} x1.`,
+          balanceLine: `Balance ${spiritStones} -> ${spiritStones + quote.finalPrice}; shop stock ${line.qty} -> ${line.qty + 1}.`,
+          exchangeTerms,
+          inventoryPreview,
+          durableEffectNotes: [
+            'actionRecords row',
+            'worldEvents row with shop stock and wallet facts',
+            'shop wallet funds the payout',
+            'actor inventory and shop state settle atomically in Convex',
+          ],
+        }),
+      },
+    ];
+  });
+  return [...sell, ...buy].slice(0, 12);
+}
+
+function shopSummary(shop: ShopState, itemId: string) {
+  const line = shop.stock.find((candidate) => candidate.itemId === itemId)!;
+  return {
+    shopId: shop.shopId,
+    name: shop.name,
+    walletSpiritStones: shop.walletSpiritStones,
+    walletCapacity: shop.walletCapacity,
+    restockSourceId: shop.restockSourceId,
+    restockIntervalMs: shop.restockIntervalMs,
+    nextRestockAt: shop.nextRestockAt,
+    stock: line.qty,
+    capacity: line.capacity,
+  };
+}
+
 export function optionParams(option: { params?: Record<string, unknown> } | undefined) {
   return option?.params;
 }
@@ -179,7 +388,7 @@ function inventoryQty(inventory: InventoryItem[], itemId: string) {
 
 function inventoryDeltaPreview(
   deltas: Array<{
-    owner: 'actor' | 'target';
+    owner: 'actor' | 'target' | 'shop';
     itemId: string;
     before: number;
     delta: number;
@@ -200,8 +409,8 @@ function confirmationPreview(args: {
   primaryLine: string;
   balanceLine?: string;
   exchangeTerms?: Array<{
-    from: 'actor' | 'target';
-    to: 'actor' | 'target';
+    from: 'actor' | 'target' | 'shop';
+    to: 'actor' | 'target' | 'shop';
     itemName: string;
     qty: number;
   }>;
@@ -229,8 +438,8 @@ function confirmationPreview(args: {
 
 function exchangeTermsLine(
   terms: Array<{
-    from: 'actor' | 'target';
-    to: 'actor' | 'target';
+    from: 'actor' | 'target' | 'shop';
+    to: 'actor' | 'target' | 'shop';
     itemName: string;
     qty: number;
   }>,
@@ -249,6 +458,6 @@ function inventoryDeltaLine(preview: ReturnType<typeof inventoryDeltaPreview>) {
     .join(' | ');
 }
 
-function ownerLabel(owner: 'actor' | 'target') {
-  return owner === 'actor' ? 'You' : 'Target';
+function ownerLabel(owner: 'actor' | 'target' | 'shop') {
+  return owner === 'actor' ? 'You' : owner === 'shop' ? 'Shop' : 'Target';
 }

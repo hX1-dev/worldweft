@@ -1,7 +1,17 @@
 import type { ActionResult, Effects, EventVisibility } from './actionSchema';
-import { itemBaseValue } from './items';
+import { healingAmount, itemBaseValue, itemDef, itemName } from './items';
 import { quotePrice, type SellerView } from './priceLogic';
 import { NEUTRAL_PHASE_MODS, type PhaseMods } from './timeLogic';
+import { MAX_HEALTH, isActorIncapacitated } from './lifeStateLogic';
+import {
+  applyCultivationEnhancements,
+  clampCultivationEnergy,
+  cultivationModeAvailable,
+  cultivationResourceForMode,
+  hasCultivationPendant,
+  parseCultivationMode,
+  type CultivationMode,
+} from './cultivationResourceLogic';
 
 // 规则引擎的「纯逻辑层」（M2 起，M3 补齐 8 动作）。
 // 关键约束：本文件不依赖 Convex（只 import type），输入是普通数据快照，输出是纯结果，
@@ -17,6 +27,7 @@ export type ActorSnapshot = {
   cultivationXp: number;
   mood: number;
   health: number;
+  maxHealth?: number;
   spirit: number;
   reputation: number;
   currentLocationId?: string;
@@ -80,6 +91,9 @@ const REALM_MAX_STAGE: Record<string, number> = {
 export function realmMaxStage(realm: string): number {
   return REALM_MAX_STAGE[realm] ?? 9;
 }
+export function isCultivationCap(realm: string, stage: number): boolean {
+  return realm === REALM_ORDER[REALM_ORDER.length - 1] && stage >= realmMaxStage(realm);
+}
 export function realmDisplayName(realm: string): string {
   return REALM_NAME[realm] ?? realm;
 }
@@ -93,6 +107,19 @@ export function breakthroughThreshold(realm: string, stage: number): number {
   return (realmRank(realm) + 1) * (40 + stage * 15);
 }
 
+// 手动突破只处理跨境大关；境内升层由 autoAdvanceLayers 自动兑现。
+export function canAttemptRealmBreakthrough(
+  realm: string,
+  stage: number,
+  cultivationXp: number,
+): boolean {
+  return (
+    stage >= realmMaxStage(realm) &&
+    !isCultivationCap(realm, stage) &&
+    cultivationXp >= breakthroughThreshold(realm, stage)
+  );
+}
+
 // 综合战力（切磋用）：境界为主，层数、心境、气血为辅。
 function combatPower(a: ActorSnapshot): number {
   return realmRank(a.realm) * 100 + a.realmStage * 10 + a.mood + a.health;
@@ -103,12 +130,53 @@ function hasItem(a: ActorSnapshot, itemId: string, qty = 1): boolean {
   return !!entry && entry.qty >= qty;
 }
 
+export type UseItemInput = {
+  actor: ActorSnapshot;
+  itemId: string;
+};
+
+// 首版物品使用只实现「受伤但清醒的角色自用疗伤丹」。治疗量来自目录，
+// 实际 effect 会按 maxHealth 截断，确保事件记录与最终持久状态一致。
+export function resolveUseItem(input: UseItemInput): ActionResult {
+  const { actor, itemId } = input;
+  if (isActorIncapacitated(actor.health)) {
+    return reject('actor_incapacitated', `${actor.name}气血已尽，无法自行服药。`);
+  }
+  const item = itemDef(itemId);
+  if (!item) {
+    return reject('unknown_item', `物品「${itemId}」不在已知目录中。`);
+  }
+  const amount = healingAmount(itemId);
+  if (amount === null) {
+    return reject('item_not_healing', `「${itemName(itemId)}」并非可用于疗伤的丹药。`);
+  }
+  if (!hasItem(actor, itemId)) {
+    return reject('item_not_owned', `${actor.name}并无「${itemName(itemId)}」，无法服用。`);
+  }
+  const maxHealth = Math.max(1, actor.maxHealth ?? MAX_HEALTH);
+  if (actor.health >= maxHealth) {
+    return reject('health_already_full', `${actor.name}气血充盈，无需服用疗伤丹。`);
+  }
+  const effectiveAmount = Math.min(amount, maxHealth - Math.max(0, actor.health));
+  return applied(
+    'healing_item_used',
+    `${actor.name}服下一枚「${itemName(itemId)}」，恢复了 ${effectiveAmount} 点气血。`,
+    {
+      health: effectiveAmount,
+      items: [{ from: actor.actorId, itemId, qty: 1 }],
+    },
+    'item_used',
+    'private',
+  );
+}
+
 // —— 8 个动作的纯规则 ——
 
 export type CultivateInput = {
   actor: ActorSnapshot;
   location: LocationSnapshot;
   roll: number;
+  cultivationMode?: unknown;
   phaseMods?: PhaseMods; // 昼夜修正（W3a）：清晨修炼小幅加成
 };
 const CULTIVATE_BASE_XP = 5;
@@ -117,20 +185,39 @@ const MOOD_FLOOR = -3;
 // 修炼（§8.1）：成功增修为；地点不允许或心境过低则拒绝；极小概率顿悟/走火入魔。
 export function resolveCultivate(input: CultivateInput): ActionResult {
   const { actor, location, roll } = input;
+  const mode = parseCultivationMode(input.cultivationMode);
   const mods = input.phaseMods ?? NEUTRAL_PHASE_MODS;
+  if (!mode) {
+    return reject('invalid_cultivation_mode', '修炼模式无效，只能选择吐纳、灵石或聚气丹。');
+  }
   if (!location.allowedActions.includes('cultivate')) {
     return reject('location_forbids_cultivate', `${location.name}不容在此处吐纳修炼。`);
   }
   if (actor.mood <= MOOD_FLOOR) {
     return reject('mood_too_low', `${actor.name}心境不宁，难以静心修炼。`);
   }
+  if (!cultivationModeAvailable(mode, actor.inventory)) {
+    return reject(
+      'cultivation_resource_unavailable',
+      `${actor.name}没有可用的${cultivationModeLabel(mode)}，无法按所选方式修炼。`,
+    );
+  }
+  const resource = cultivationResourceForMode(mode);
+  const items = resource
+    ? [{ from: actor.actorId, itemId: resource.itemId, qty: resource.quantity }]
+    : undefined;
   const baseGain =
-    CULTIVATE_BASE_XP + location.spiritualEnergy + Math.floor(roll * 4) + mods.cultivationXpBonus;
+    CULTIVATE_BASE_XP +
+    clampCultivationEnergy(location.spiritualEnergy) +
+    Math.floor(roll * 4) +
+    mods.cultivationXpBonus;
+  const enhancedXp = (baseXp: number) =>
+    applyCultivationEnhancements(baseXp, mode, hasCultivationPendant(actor.inventory));
   if (roll >= 0.95) {
     return applied(
       'cultivation_breakthrough_insight',
       `${actor.name}于${location.name}静修，忽有顿悟，修为大进。`,
-      { cultivationXp: baseGain * 2, mood: 2 },
+      { cultivationXp: enhancedXp(baseGain * 2), mood: 2, items },
       'cultivation_completed',
     );
   }
@@ -138,16 +225,22 @@ export function resolveCultivate(input: CultivateInput): ActionResult {
     return applied(
       'cultivation_deviation',
       `${actor.name}修炼时灵气紊乱，险些走火入魔，所获甚微。`,
-      { cultivationXp: 1, mood: -2, health: -1 },
+      { cultivationXp: enhancedXp(1), mood: -2, health: -1, items },
       'cultivation_completed',
     );
   }
   return applied(
     'cultivation_success',
     `${actor.name}在${location.name}吐纳行功，修为稳步精进。`,
-    { cultivationXp: baseGain, mood: 1 },
+    { cultivationXp: enhancedXp(baseGain), mood: 1, items },
     'cultivation_completed',
   );
+}
+
+function cultivationModeLabel(mode: CultivationMode): string {
+  if (mode === 'spirit_stone') return '灵石';
+  if (mode === 'qi_pill') return '聚气丹';
+  return '天地灵气';
 }
 
 export type BreakthroughInput = {
@@ -163,6 +256,18 @@ export type BreakthroughInput = {
 //   心境与地点灵气提升成功率，境界越高越难。
 export function resolveBreakthrough(input: BreakthroughInput): ActionResult {
   const { actor, location, roll, mishapRoll } = input;
+  if (!location.allowedActions.includes('breakthrough')) {
+    return reject(
+      'location_forbids_breakthrough',
+      `${location.name}并非合适的突破之地。`,
+    );
+  }
+  if (isCultivationCap(actor.realm, actor.realmStage)) {
+    return reject(
+      'realm_cap_reached',
+      `${actor.name}已至${realmDisplayName(actor.realm)}圆满，此界已无更高境界可破。`,
+    );
+  }
   const threshold = breakthroughThreshold(actor.realm, actor.realmStage);
   if (actor.cultivationXp < threshold) {
     return reject('insufficient_cultivation', `${actor.name}修为未足（需 ${threshold}），强行冲关只是徒劳。`);
@@ -170,13 +275,11 @@ export function resolveBreakthrough(input: BreakthroughInput): ActionResult {
   const overflow = actor.cultivationXp - threshold;
   const isRealmGate = actor.realmStage >= realmMaxStage(actor.realm);
 
-  // —— 境内升层：一路直达，攒够即成 ——
+  // 境内升层由 autoAdvanceLayers 负责，手动高风险动作只允许跨境大关。
   if (!isRealmGate) {
-    return applied(
-      'breakthrough_success',
-      `${actor.name}水到渠成，修为精进，晋入${REALM_NAME[actor.realm] ?? actor.realm} ${actor.realmStage + 1} 层。`,
-      { realmChange: { realm: actor.realm, realmStage: actor.realmStage + 1, cultivationXp: overflow }, mood: 1 },
-      'breakthrough_resolved',
+    return reject(
+      'breakthrough_not_realm_gate',
+      `${actor.name}尚未抵达当前境界大关，境内升层会在修炼时自然兑现。`,
     );
   }
 
@@ -221,8 +324,10 @@ export type TalkInput = {
   topic?: string;
 };
 
-// 交谈（§8.2）：关系过差则拒绝；否则小幅升温。W4b-G：summary 据 topic/关系生成更具体的内容
-//（模板，无 LLM），不再是空泛套话——对话是需求的副产物，事件里要看得出「为何而谈」。
+// 交谈（§8.2）：关系过差则拒绝；否则形成真实会话终态。W4b-G：summary 据 topic/关系
+// 生成更具体的内容（模板，无 LLM），不再是空泛套话——对话是需求的副产物，事件里要
+// 看得出「为何而谈」。LWSE-0 G0：交流发生不等于关系已经改变；只有后续可验证的赠礼、
+// 履约、教学、伤害等世界结果才能写入持久关系。
 export function resolveTalk(input: TalkInput): ActionResult {
   const { actor, target, relationship, roll, topic } = input;
   if (relationship <= -50) {
@@ -233,12 +338,12 @@ export function resolveTalk(input: TalkInput): ActionResult {
   const tone = !warmed
     ? '只寒暄两句，气氛淡淡'
     : relationship >= 25
-      ? '相谈甚欢，情谊更笃'
-      : '相谈尚欢';
+      ? '相谈甚欢，彼此都愿继续听下去'
+      : '谈得尚算投机';
   return applied(
     'conversation_started',
     `${actor.name}${about}与${target.name}叙谈，${tone}。`,
-    { mood: warmed ? 1 : 0, relationships: warmed ? [{ targetActorId: target.actorId, delta: 2 }] : [] },
+    { mood: warmed ? 1 : 0, relationships: [] },
     'conversation_started',
   );
 }
@@ -323,11 +428,10 @@ export function resolveExplore(input: ExploreInput): ActionResult {
   }
   return applied(
     'exploration_resource',
-    `${actor.name}在${location.name}寻得一份机缘，收获灵药。`,
+    `${actor.name}在${location.name}寻得一份修行见闻，但环境资源须从真实节点采集。`,
     {
       cultivationXp: 5 + location.spiritualEnergy,
       mood: 1,
-      items: [{ to: actor.actorId, itemId: 'spirit_herb', qty: 1 }],
     },
     'exploration_resolved',
   );

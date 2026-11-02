@@ -37,21 +37,29 @@ export type PriceQuote = {
   relationshipMultiplier: number;
   suspicionMultiplier: number;
   regularMultiplier: number;
+  scarcityMultiplier: number;
   finalPrice: number;
 };
 
 // 报价 = basePrice × 关系 × 怀疑 × 熟客，再钳进 [0.7, 2.0]×base，取整。
-export function quotePrice(basePrice: number, v: SellerView): PriceQuote {
+export function quotePrice(
+  basePrice: number,
+  v: SellerView,
+  market: { scarcityMultiplier?: number; ceilingMultiplier?: number } = {},
+): PriceQuote {
   const rel = relationshipMultiplier(v);
   const susp = suspicionMultiplier(v);
   const reg = regularMultiplier(v.tags);
-  const raw = basePrice * rel * susp * reg;
-  const clamped = Math.max(basePrice * FLOOR, Math.min(basePrice * CEIL, raw));
+  const scarcity = Math.max(0.01, market.scarcityMultiplier ?? 1);
+  const ceiling = Math.max(FLOOR, market.ceilingMultiplier ?? CEIL);
+  const raw = basePrice * rel * susp * reg * scarcity;
+  const clamped = Math.max(basePrice * FLOOR, Math.min(basePrice * ceiling, raw));
   return {
     basePrice,
     relationshipMultiplier: rel,
     suspicionMultiplier: susp,
     regularMultiplier: reg,
+    scarcityMultiplier: scarcity,
     finalPrice: Math.round(clamped),
   };
 }

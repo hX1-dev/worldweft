@@ -1,6 +1,10 @@
 export const GODOT_BRIDGE_SMOKE_ACTOR_PREFIX = 'godot_smoke_';
 
-export type GodotBridgeScope = 'world:read' | 'action:write' | 'tick:debug';
+export type GodotBridgeScope =
+  | 'world:read'
+  | 'action:write'
+  | 'tick:debug'
+  | 'simulation:write';
 
 export type GodotBridgeEnvironment = Record<string, string | undefined>;
 
@@ -55,7 +59,12 @@ export type GodotBridgeBindingResult =
 
 const MIN_TOKEN_LENGTH = 32;
 const READ_ACTION_SCOPES = ['world:read', 'action:write'] as const;
-const DEBUG_SCOPES = ['world:read', 'action:write', 'tick:debug'] as const;
+const DEBUG_SCOPES = [
+  'world:read',
+  'action:write',
+  'tick:debug',
+  'simulation:write',
+] as const;
 
 function readTrimmed(env: GodotBridgeEnvironment, key: string) {
   const value = env[key]?.trim();
@@ -306,6 +315,9 @@ export function godotBridgeSecuritySummary(config: GodotBridgeSecurityConfig) {
     debugTickEnabled:
       config.configured &&
       config.credentials.some((credential) => credential.scopes.includes('tick:debug')),
+    simulationWriteEnabled:
+      config.configured &&
+      config.credentials.some((credential) => credential.scopes.includes('simulation:write')),
     allowedOriginCount: config.allowedOrigins.length,
     nativeClientAllowed: true,
   } as const;

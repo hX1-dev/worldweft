@@ -4,10 +4,7 @@ import { internal } from './_generated/api';
 import type { Doc, Id } from './_generated/dataModel';
 import type { ActionCtx, QueryCtx } from './_generated/server';
 import { actionSource, actionType } from './xianxia/actionSchema';
-import {
-  godotPresentationPolishPreview,
-  godotTraceChain,
-} from './godotPresentation';
+import { godotPresentationPolishPreview, godotTraceChain } from './godotPresentation';
 import {
   eventInvolvesActor,
   summarizeAgent,
@@ -17,28 +14,35 @@ import {
   summarizePlayer,
   summarizeReplayTraceEntries,
 } from './godotReadModel';
+import { buildGodotCapabilityActions, defaultGodotRelationshipDims } from './godotCapabilities';
 import {
-  buildGodotCapabilityActions,
-  defaultGodotRelationshipDims,
-} from './godotCapabilities';
-import { contractError } from './godotBridgeContract';
+  contractError,
+  GODOT_ACTION_EXECUTION_PROTOCOL_VERSION,
+  GODOT_MOVEMENT_PROTOCOL_VERSION,
+} from './godotBridgeContract';
 import {
   clampGodotPageLimit,
   godotActionRecordMapId,
   godotMapMatches,
   godotPageInfo,
 } from './godotMapBoundary';
-import {
-  clampGodotRange,
-  evaluateGodotSpatialState,
-  godotLocationForTile,
-} from './godotSpatial';
+import { clampGodotRange, evaluateGodotSpatialState, godotLocationForTile } from './godotSpatial';
 import {
   canGodotViewerReadEvent,
   canReadGodotActorPrivateState,
   godotReadProjection,
   type GodotViewerState,
 } from './godotViewerPolicy';
+import { isActorIncapacitated, lifeStateForHealth } from './xianxia/lifeStateLogic';
+import { refreshResourceStock, resourceAccessAllowed } from './xianxia/resourceNodeLogic';
+import { fatigueBand, normalizeFatigue } from './xianxia/fatigueLogic';
+import { refreshShopState } from './xianxia/shopLogic';
+import { readGameHour } from './xianxia/config';
+import { evaluateGiftActionCooldown } from './xianxia/giftLogic';
+import { evaluateTeachingActionCooldown } from './xianxia/teachingLogic';
+import { requestRevision } from './xianxia/questLogic';
+import { QINGLAN_VALLEY_GATE_DATA } from '../data/qinglanValleyGate.generated';
+import { QINGLAN_VALLEY_GATE_MAP_ID } from './xianxia/valleyMovementContracts';
 
 const mapTile = v.object({ x: v.number(), y: v.number() });
 
@@ -88,7 +92,6 @@ type GodotSpatialArgs = {
   actorTile?: { x: number; y: number };
   interactionRangeTiles?: number;
 };
-
 
 async function resolveWorldStatusForQuery(
   ctx: QueryCtx,
@@ -373,6 +376,14 @@ export const actionRecord = internalQuery({
     const event = await ctx.db
       .query('worldEvents')
       .withIndex('byAction', (q) => q.eq('worldId', record.worldId).eq('actionId', record._id))
+      .order('desc')
+      .first();
+    const execution = await ctx.db
+      .query('actionExecutions')
+      .withIndex('byAction', (q) =>
+        q.eq('worldId', record.worldId).eq('actionRecordId', record._id),
+      )
+      .order('desc')
       .first();
     if (
       !(await canGodotViewerReadActionRecord(
@@ -390,6 +401,7 @@ export const actionRecord = internalQuery({
       ok: true,
       ...summarizeGodotActionTrace(record, event),
       metadata,
+      execution: execution ? summarizeActionExecution(execution) : null,
     };
   },
 });
@@ -416,6 +428,7 @@ export const presentationPreview = internalQuery({
     const event = await ctx.db
       .query('worldEvents')
       .withIndex('byAction', (q) => q.eq('worldId', record.worldId).eq('actionId', record._id))
+      .order('desc')
       .first();
     if (
       !(await canGodotViewerReadActionRecord(
@@ -459,11 +472,7 @@ export const actorContext = internalQuery({
     const mapId = args.mapId ?? 'qinglan';
     const viewerActorId = args.viewerActorId ?? 'godot_player';
     const debugView = args.debugView === true;
-    const privateActorState = canReadGodotActorPrivateState(
-      viewerActorId,
-      args.actorId,
-      debugView,
-    );
+    const privateActorState = canReadGodotActorPrivateState(viewerActorId, args.actorId, debugView);
     const resident = await loadQinglanResidentByActor(ctx, status.worldId, mapId, args.actorId);
     const profile = await loadProfile(ctx, status.worldId, args.actorId);
     const profileOnMap = profile && godotMapMatches(profile.mapId, mapId) ? profile : null;
@@ -646,6 +655,22 @@ export const capabilities = internalQuery({
     const targetProfile = targetResident
       ? await loadProfile(ctx, status.worldId, targetResident.actorId)
       : null;
+    const shopDoc = targetResident
+      ? await ctx.db
+          .query('shopInventories')
+          .withIndex('byMerchant', (q) =>
+            q
+              .eq('worldId', status.worldId)
+              .eq('merchantActorId', targetResident.actorId),
+          )
+          .first()
+      : null;
+    const shop =
+      shopDoc &&
+      shopDoc.mapId === mapId &&
+      (!currentLocation || shopDoc.locationId === currentLocation.locationId)
+        ? refreshShopState(shopDoc, Date.now()).shop
+        : null;
     const targetView = targetResident
       ? await loadRelationshipDimsForQuery(
           ctx,
@@ -662,24 +687,401 @@ export const capabilities = internalQuery({
           targetResident.actorId,
         )
       : defaultGodotRelationshipDims();
-    const actions = buildGodotCapabilityActions({
+    const now = Date.now();
+    const latestExecution = await ctx.db
+      .query('actionExecutions')
+      .withIndex('byActorRevision', (q) =>
+        q.eq('worldId', status.worldId).eq('actorId', args.actorId),
+      )
+      .order('desc')
+      .first();
+    const activeExecution =
+      latestExecution &&
+      ['pending', 'accepted', 'acting'].includes(latestExecution.status) &&
+      latestExecution.expiresAt > now &&
+      latestExecution.hardDeadlineAt > now
+        ? latestExecution
+        : null;
+    let teacherBusy = false;
+    if (targetResident) {
+      const targetOwnExecution = await ctx.db
+        .query('actionExecutions')
+        .withIndex('byActorRevision', (q) =>
+          q.eq('worldId', status.worldId).eq('actorId', targetResident.actorId),
+        )
+        .order('desc')
+        .first();
+      teacherBusy = !!(
+        targetOwnExecution &&
+        ['pending', 'accepted', 'acting'].includes(targetOwnExecution.status) &&
+        targetOwnExecution.expiresAt > now &&
+        targetOwnExecution.hardDeadlineAt > now
+      );
+      if (!teacherBusy) {
+        for (const executionStatus of ['pending', 'accepted', 'acting'] as const) {
+          const lessons = await ctx.db
+            .query('actionExecutions')
+            .withIndex('byTargetStatus', (q) =>
+              q
+                .eq('worldId', status.worldId)
+                .eq('targetActorId', targetResident.actorId)
+                .eq('status', executionStatus),
+            )
+            .take(64);
+          if (
+            lessons.some(
+              (lesson) =>
+                lesson.actionType === 'request_teaching' &&
+                lesson.expiresAt > now &&
+                lesson.hardDeadlineAt > now,
+            )
+          ) {
+            teacherBusy = true;
+            break;
+          }
+        }
+      }
+    }
+    let activeCombatEncounter = await ctx.db
+      .query('combatEncounters')
+      .withIndex('byAttackerStatus', (q) =>
+        q
+          .eq('worldId', status.worldId)
+          .eq('attackerActorId', args.actorId)
+          .eq('status', 'active'),
+      )
+      .order('desc')
+      .first();
+    if (!activeCombatEncounter) {
+      activeCombatEncounter = await ctx.db
+        .query('combatEncounters')
+        .withIndex('byDefenderStatus', (q) =>
+          q
+            .eq('worldId', status.worldId)
+            .eq('defenderActorId', args.actorId)
+            .eq('status', 'active'),
+        )
+        .order('desc')
+        .first();
+    }
+    let lootEncounter = null;
+    if (targetProfile && currentLocation && isActorIncapacitated(targetProfile.health)) {
+      for (const encounterStatus of ['attacker_defeated', 'defender_defeated'] as const) {
+        const rows = await ctx.db
+          .query('combatEncounters')
+          .withIndex('byLocationStatus', (q) =>
+            q
+              .eq('worldId', status.worldId)
+              .eq('mapId', mapId)
+              .eq('locationId', currentLocation.locationId)
+              .eq('status', encounterStatus),
+          )
+          .order('desc')
+          .take(20);
+        lootEncounter = rows.find((row) => row.defeatedActorId === targetProfile.actorId) ?? null;
+        if (lootEncounter) break;
+      }
+    }
+    const reservedTargetItems = new Map<string, number>();
+    if (targetProfile) {
+      for (const executionStatus of ['pending', 'accepted', 'acting'] as const) {
+        const reservations = await ctx.db
+          .query('actionExecutions')
+          .withIndex('byTargetStatus', (q) =>
+            q
+              .eq('worldId', status.worldId)
+              .eq('targetActorId', targetProfile.actorId)
+              .eq('status', executionStatus),
+          )
+          .take(64);
+        for (const reservation of reservations) {
+          if (
+            reservation.expiresAt <= now ||
+            reservation.hardDeadlineAt <= now ||
+            !reservation.reservedTargetItemId
+          ) continue;
+          reservedTargetItems.set(
+            reservation.reservedTargetItemId,
+            (reservedTargetItems.get(reservation.reservedTargetItemId) ?? 0) +
+              (reservation.reservedTargetItemQuantity ?? 0),
+          );
+        }
+      }
+    }
+    const reservedActorItems = new Map<string, number>();
+    for (const executionStatus of ['pending', 'accepted', 'acting'] as const) {
+      const ownReservations = await ctx.db
+        .query('actionExecutions')
+        .withIndex('byActorStatus', (q) =>
+          q
+            .eq('worldId', status.worldId)
+            .eq('actorId', args.actorId)
+            .eq('status', executionStatus),
+        )
+        .take(64);
+      for (const reservation of ownReservations) {
+        if (
+          reservation.expiresAt <= now ||
+          reservation.hardDeadlineAt <= now ||
+          !reservation.reservedItemId
+        ) continue;
+        reservedActorItems.set(
+          reservation.reservedItemId,
+          (reservedActorItems.get(reservation.reservedItemId) ?? 0) +
+            (reservation.reservedItemQuantity ?? 0),
+        );
+      }
+      const targetedReservations = await ctx.db
+        .query('actionExecutions')
+        .withIndex('byTargetStatus', (q) =>
+          q
+            .eq('worldId', status.worldId)
+            .eq('targetActorId', args.actorId)
+            .eq('status', executionStatus),
+        )
+        .take(64);
+      for (const reservation of targetedReservations) {
+        if (
+          reservation.expiresAt <= now ||
+          reservation.hardDeadlineAt <= now ||
+          !reservation.reservedTargetItemId
+        ) continue;
+        reservedActorItems.set(
+          reservation.reservedTargetItemId,
+          (reservedActorItems.get(reservation.reservedTargetItemId) ?? 0) +
+            (reservation.reservedTargetItemQuantity ?? 0),
+        );
+      }
+    }
+    let giftCooldown: { resultCode: string; reason: string } | null = null;
+    let teachingCooldown: { resultCode: string; reason: string } | null = null;
+    if (targetResident) {
+      const usages = await ctx.db
+        .query('socialActionUsages')
+        .withIndex('byActorTargetTypeDay', (q) =>
+          q
+            .eq('worldId', status.worldId)
+            .eq('actorId', args.actorId)
+            .eq('targetActorId', targetResident.actorId)
+            .eq('actionType', 'gift'),
+        )
+        .collect();
+      const gameDay = Math.floor((await readGameHour(ctx, status.worldId, now)) / 24);
+      const cooldown = evaluateGiftActionCooldown(
+        gameDay,
+        usages.map((usage) => usage.sourceGameDay),
+      );
+      if (!cooldown.ok) giftCooldown = cooldown;
+      const teachingUsages = await ctx.db
+        .query('socialActionUsages')
+        .withIndex('byActorTargetTypeDay', (q) =>
+          q.eq('worldId', status.worldId).eq('actorId', args.actorId),
+        )
+        .collect();
+      const teachingGate = evaluateTeachingActionCooldown(
+        gameDay,
+        targetResident.actorId,
+        teachingUsages
+          .filter((usage) => usage.actionType === 'request_teaching')
+          .map((usage) => ({
+            targetActorId: usage.targetActorId,
+            sourceGameDay: usage.sourceGameDay,
+          })),
+      );
+      if (!teachingGate.ok) teachingCooldown = teachingGate;
+    }
+    const combat = {
+      activeEncounterId: activeCombatEncounter?.encounterId,
+      opponentActorId: activeCombatEncounter
+        ? activeCombatEncounter.attackerActorId === args.actorId
+          ? activeCombatEncounter.defenderActorId
+          : activeCombatEncounter.attackerActorId
+        : undefined,
+      lootEncounterId: lootEncounter?.encounterId,
+      lootOwnerActorId: lootEncounter?.lootOwnerActorId,
+      lootProtectedUntil: lootEncounter?.lootProtectedUntil,
+      lootPriorityAllowed:
+        !!lootEncounter &&
+        (!lootEncounter.lootOwnerActorId ||
+          lootEncounter.lootOwnerActorId === args.actorId ||
+          (lootEncounter.lootProtectedUntil ?? 0) <= now),
+      lootOptions: (targetProfile?.inventory ?? [])
+        .map((item) => ({
+          itemId: item.itemId,
+          qty: Math.max(0, item.qty - (reservedTargetItems.get(item.itemId) ?? 0)),
+        }))
+        .filter((item) => item.qty > 0),
+    };
+    const activeRequests = (
+      await Promise.all(
+        (['offered', 'accepted', 'ready_to_turn_in'] as const).map((requestStatus) =>
+          ctx.db
+            .query('requests')
+            .withIndex('byAssignee', (q) =>
+              q
+                .eq('worldId', status.worldId)
+                .eq('assigneeActorId', args.actorId)
+                .eq('status', requestStatus),
+            )
+            .take(20),
+        ),
+      )
+    ).flat();
+    const selectedRequest =
+      activeRequests
+        .filter((request) => request.issuerActorId === args.targetActorId)
+        .sort((a, b) => a.createdAt - b.createdAt)[0] ?? null;
+    const resourceNodeDocs = currentLocation
+      ? await ctx.db
+          .query('resourceNodes')
+          .withIndex('byLocation', (q) =>
+            q
+              .eq('worldId', status.worldId)
+              .eq('mapId', mapId)
+              .eq('locationId', currentLocation.locationId),
+          )
+          .take(24)
+      : [];
+    const reservedByNode = new Map<string, number>();
+    for (const executionStatus of ['pending', 'accepted', 'acting'] as const) {
+      const activeAtMap = await ctx.db
+        .query('actionExecutions')
+        .withIndex('byMapStatus', (q) =>
+          q
+            .eq('worldId', status.worldId)
+            .eq('mapId', mapId)
+            .eq('status', executionStatus),
+        )
+        .take(64);
+      for (const execution of activeAtMap) {
+        if (
+          !execution.resourceNodeId ||
+          execution.expiresAt <= now ||
+          execution.hardDeadlineAt <= now
+        ) {
+          continue;
+        }
+        reservedByNode.set(
+          execution.resourceNodeId,
+          (reservedByNode.get(execution.resourceNodeId) ?? 0) +
+            (execution.reservedQuantity ?? 0),
+        );
+      }
+    }
+    const resourceNodes = resourceNodeDocs.map((node) => {
+      const refreshed = refreshResourceStock(node, now);
+      return {
+        resourceNodeId: node.resourceNodeId,
+        name: node.name,
+        itemId: node.itemId,
+        tile: node.tile,
+        stock: refreshed.stock,
+        available: Math.max(
+          0,
+          refreshed.stock - (reservedByNode.get(node.resourceNodeId) ?? 0),
+        ),
+        accessible: !!actorProfile && resourceAccessAllowed(node, actorProfile.actorId),
+      };
+    });
+    const latestMovement =
+      mapId === QINGLAN_VALLEY_GATE_MAP_ID
+        ? await ctx.db
+            .query('movementCommands')
+            .withIndex('byActorRevision', (q) =>
+              q.eq('worldId', status.worldId).eq('actorId', args.actorId),
+            )
+            .order('desc')
+            .first()
+        : null;
+    const arrivedInteractionId =
+      latestMovement?.status === 'arrived' &&
+      latestMovement.requestedTarget.kind === 'interactable'
+        ? latestMovement.requestedTarget.interactionId
+        : undefined;
+    const inspectTargets =
+      mapId === QINGLAN_VALLEY_GATE_MAP_ID && currentLocation
+        ? QINGLAN_VALLEY_GATE_DATA.interactions.flatMap((interaction) => {
+            if (
+              interaction.locationId !== currentLocation.locationId ||
+              !(interaction.actions as readonly string[]).includes('inspect') ||
+              !('inspection' in interaction)
+            ) {
+              return [];
+            }
+            return [{
+              interactionId: interaction.id,
+              name: interaction.name,
+              tile: interaction.tile,
+              observationId: interaction.inspection.observationId,
+              observationRevision: interaction.inspection.revision,
+            }];
+          })
+        : [];
+    const baseActions = buildGodotCapabilityActions({
       actorTile: args.actorTile,
       range,
       targetResident,
       currentLocation,
       actorProfile,
       targetProfile,
+      shop,
       targetView,
       actorViewOfTarget,
+      resourceNodes,
+      inspectTargets,
+      arrivedInteractionId,
+      combat,
+      request: selectedRequest
+        ? {
+            requestId: String(selectedRequest._id),
+            revision: requestRevision(selectedRequest),
+            status: selectedRequest.status,
+            type: selectedRequest.type,
+            summary: selectedRequest.summary,
+          }
+        : null,
+      giftCooldown,
+      teachingCooldown,
+      teacherBusy,
+      reservedActorItems: Object.fromEntries(reservedActorItems),
     });
+    const actions = activeExecution
+      ? baseActions.map((action) => ({
+          ...action,
+          enabled: false,
+          reason: `Action execution ${activeExecution.actionType} is still ${activeExecution.status}.`,
+        }))
+      : baseActions;
 
     return {
       ok: true,
+      movementProtocolVersion: GODOT_MOVEMENT_PROTOCOL_VERSION,
+      actionExecutionProtocolVersion: GODOT_ACTION_EXECUTION_PROTOCOL_VERSION,
       worldId: status.worldId,
       mapId,
       actorId: args.actorId,
       actorTile: args.actorTile,
       interactionRangeTiles: range,
+      actorState: actorProfile
+        ? {
+            health: actorProfile.health,
+            maxHealth: actorProfile.maxHealth ?? 10,
+            lifeState: lifeStateForHealth(actorProfile.health, actorProfile.maxHealth ?? 10),
+            fatigue: normalizeFatigue(actorProfile.fatigue),
+            fatigueBand: fatigueBand(actorProfile.fatigue),
+          }
+        : null,
+      activeExecution: activeExecution ? summarizeActionExecution(activeExecution) : null,
+      combat,
+      request: selectedRequest
+        ? {
+            requestId: String(selectedRequest._id),
+            revision: requestRevision(selectedRequest),
+            status: selectedRequest.status,
+            type: selectedRequest.type,
+            summary: selectedRequest.summary,
+          }
+        : null,
       target: targetResident
         ? {
             actorId: targetResident.actorId,
@@ -687,6 +1089,17 @@ export const capabilities = internalQuery({
             role: targetResident.role,
             tile: targetResident.displayTile,
             locationId: targetResident.currentLocationId,
+          }
+        : null,
+      shop: shop
+        ? {
+            shopId: shop.shopId,
+            name: shop.name,
+            walletSpiritStones: shop.walletSpiritStones,
+            walletCapacity: shop.walletCapacity,
+            restockSourceId: shop.restockSourceId,
+            nextRestockAt: shop.nextRestockAt,
+            stock: shop.stock,
           }
         : null,
       currentLocation: currentLocation ? summarizeLocation(currentLocation) : null,
@@ -1048,6 +1461,37 @@ async function canGodotViewerReadActionRecord(
   return canGodotViewerReadEvent(event, viewerState);
 }
 
+function summarizeActionExecution(execution: Doc<'actionExecutions'>) {
+  return {
+    protocolVersion: GODOT_ACTION_EXECUTION_PROTOCOL_VERSION,
+    executionId: execution._id,
+    actionRecordId: execution.actionRecordId,
+    revision: execution.revision,
+    actorId: execution.actorId,
+    actionType: execution.actionType,
+    status: execution.status,
+    leaseOwner: execution.leaseOwner,
+    mapId: execution.mapId,
+    locationId: execution.locationId,
+    resourceNodeId: execution.resourceNodeId,
+    reservedQuantity: execution.reservedQuantity,
+    cultivationMode: execution.cultivationMode,
+    reservedItemId: execution.reservedItemId,
+    reservedItemQuantity: execution.reservedItemQuantity,
+    intent: execution.intent,
+    durationMs: execution.durationMs,
+    issuedAt: execution.issuedAt,
+    expiresAt: execution.expiresAt,
+    hardDeadlineAt: execution.hardDeadlineAt,
+    acceptedAt: execution.acceptedAt,
+    startedAt: execution.startedAt,
+    lastHeartbeatAt: execution.lastHeartbeatAt,
+    terminalAt: execution.terminalAt,
+    resultCode: execution.resultCode,
+    reasonCode: execution.reasonCode,
+  };
+}
+
 async function loadRelationshipDimsForQuery(
   ctx: QueryCtx,
   worldId: Id<'worlds'>,
@@ -1065,7 +1509,6 @@ async function loadRelationshipDimsForQuery(
     tags: rel?.tags ?? [],
   };
 }
-
 
 async function loadQinglanResidentByActor(
   ctx: QueryCtx,

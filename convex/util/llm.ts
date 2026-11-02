@@ -138,12 +138,27 @@ export function getLLMConfig(): LLMConfig {
   };
 }
 
-const AuthHeaders = (): Record<string, string> =>
-  getLLMConfig().apiKey
+const AuthHeaders = (config = getLLMConfig()): Record<string, string> =>
+  config.apiKey
     ? {
-        Authorization: 'Bearer ' + getLLMConfig().apiKey,
+        Authorization: 'Bearer ' + config.apiKey,
       }
     : {};
+
+export type ChatCompletionRequestOptions = {
+  timeoutMs?: number;
+  maxRetries?: number;
+};
+
+type ChatCompletionStats = {
+  retries: number;
+  ms: number;
+  provider: LLMConfig['provider'];
+  model: string;
+  promptTokens?: number;
+  completionTokens?: number;
+  totalTokens?: number;
+};
 
 // Overload for non-streaming
 export async function chatCompletion(
@@ -152,7 +167,8 @@ export async function chatCompletion(
   } & {
     stream?: false | null | undefined;
   },
-): Promise<{ content: string; retries: number; ms: number }>;
+  options?: ChatCompletionRequestOptions,
+): Promise<{ content: string } & ChatCompletionStats>;
 // Overload for streaming
 export async function chatCompletion(
   body: Omit<CreateChatCompletionRequest, 'model'> & {
@@ -160,40 +176,61 @@ export async function chatCompletion(
   } & {
     stream?: true;
   },
-): Promise<{ content: ChatCompletionContent; retries: number; ms: number }>;
+  options?: ChatCompletionRequestOptions,
+): Promise<{ content: ChatCompletionContent } & ChatCompletionStats>;
 export async function chatCompletion(
   body: Omit<CreateChatCompletionRequest, 'model'> & {
     model?: CreateChatCompletionRequest['model'];
   },
+  options: ChatCompletionRequestOptions = {},
 ) {
   const config = getLLMConfig();
   body.model = body.model ?? config.chatModel;
   const stopWords = body.stop ? (typeof body.stop === 'string' ? [body.stop] : body.stop) : [];
   if (config.stopWords) stopWords.push(...config.stopWords);
-  console.log(body);
+  let responseMetadata: Pick<
+    ChatCompletionStats,
+    'model' | 'promptTokens' | 'completionTokens' | 'totalTokens'
+  > = { model: body.model };
   const {
     result: content,
     retries,
     ms,
   } = await retryWithBackoff(async () => {
-    const result = await fetch(config.url + '/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...AuthHeaders(),
-      },
-
-      body: JSON.stringify(body),
-    });
+    const controller = options.timeoutMs ? new AbortController() : undefined;
+    const timeout = controller
+      ? setTimeout(() => controller.abort('llm_timeout'), options.timeoutMs)
+      : undefined;
+    let result: Response;
+    try {
+      result = await fetch(config.url + '/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...AuthHeaders(config),
+        },
+        body: JSON.stringify(body),
+        signal: controller?.signal,
+      });
+    } catch (error) {
+      if (controller?.signal.aborted) {
+        const timeoutError = new Error('Chat completion timed out');
+        (timeoutError as Error & { code?: string }).code = 'llm_timeout';
+        throw { retry: false, error: timeoutError };
+      }
+      throw error;
+    } finally {
+      if (timeout) clearTimeout(timeout);
+    }
     if (!result.ok) {
       const error = await result.text();
-      console.error({ error });
+      console.error(`Chat completion failed: provider=${config.provider} status=${result.status}`);
       if (result.status === 404 && config.provider === 'ollama') {
         await tryPullOllama(body.model!, error);
       }
       throw {
         retry: result.status === 429 || result.status >= 500,
-        error: new Error(`Chat completion failed with code ${result.status}: ${error}`),
+        error: new Error(`Chat completion failed with code ${result.status}`),
       };
     }
     if (body.stream) {
@@ -204,15 +241,22 @@ export async function chatCompletion(
       if (content === undefined) {
         throw new Error('Unexpected result from OpenAI: ' + JSON.stringify(json));
       }
-      console.log(content);
+      responseMetadata = {
+        model: json.model || body.model!,
+        promptTokens: json.usage?.prompt_tokens,
+        completionTokens: json.usage?.completion_tokens,
+        totalTokens: json.usage?.total_tokens,
+      };
       return content;
     }
-  });
+  }, options.maxRetries);
 
   return {
     content,
     retries,
     ms,
+    provider: config.provider,
+    ...responseMetadata,
   };
 }
 
@@ -356,9 +400,11 @@ type RetryError = { retry: boolean; error: any };
 
 export async function retryWithBackoff<T>(
   fn: () => Promise<T>,
+  maxRetries = RETRY_BACKOFF.length,
 ): Promise<{ retries: number; result: T; ms: number }> {
   let i = 0;
-  for (; i <= RETRY_BACKOFF.length; i++) {
+  const boundedRetries = Math.max(0, Math.min(Math.floor(maxRetries), RETRY_BACKOFF.length));
+  for (; i <= boundedRetries; i++) {
     try {
       const start = Date.now();
       const result = await fn();
@@ -366,7 +412,7 @@ export async function retryWithBackoff<T>(
       return { result, retries: i, ms };
     } catch (e) {
       const retryError = e as RetryError;
-      if (i < RETRY_BACKOFF.length) {
+      if (i < boundedRetries) {
         if (retryError.retry) {
           console.log(
             `Attempt ${i + 1} failed, waiting ${RETRY_BACKOFF[i]}ms to retry...`,

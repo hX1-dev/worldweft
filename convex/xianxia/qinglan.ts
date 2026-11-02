@@ -14,10 +14,11 @@ import {
 } from './qinglanNavigation';
 import {
   godotPlayerProfileSeed,
-  qinglanResidentProfilePatch,
+  qinglanResidentProfileSyncPatch,
   qinglanResidentProfileSeed,
 } from './qinglanProfiles';
 import { assertLegacyXianxiaWriteAccess } from './access';
+import { isActorDeceased, isActorIncapacitated } from './lifeStateLogic';
 
 export const QINGLAN_MAP_ID = 'qinglan';
 export const WORLD_MAP_ID = 'world';
@@ -44,7 +45,9 @@ type ResidentStatus =
   | 'watching'
   | 'arranging_herbs'
   | 'carrying'
-  | 'waiting';
+  | 'waiting'
+  | 'incapacitated'
+  | 'deceased';
 
 type TilePoint = { x: number; y: number };
 export type LifeSpot = {
@@ -355,13 +358,29 @@ async function tickQinglanResidentsHandler(
   let updated = 0;
   let walking = 0;
   let resting = 0;
+  let incapacitated = 0;
+  let deceased = 0;
+  const profiles = await ctx.db
+    .query('xianxiaProfiles')
+    .withIndex('byMap', (q) => q.eq('worldId', args.worldId).eq('mapId', QINGLAN_MAP_ID))
+    .take(MAX_QINGLAN_SURFACE_RESIDENTS);
+  const profilesByActor = new Map(profiles.map((profile) => [profile.actorId, profile]));
   for (const resident of residents) {
-    const patch = nextResidentPatch(resident, now);
+    const profile = profilesByActor.get(resident.actorId);
+    const residentIsDeceased = !!profile && isActorDeceased(profile);
+    const residentIsIncapacitated = !!profile && isActorIncapacitated(profile.health);
+    if (residentIsDeceased) deceased++;
+    else if (residentIsIncapacitated) incapacitated++;
+    const patch = residentIsDeceased
+      ? deceasedResidentPatch(resident, now)
+      : residentIsIncapacitated
+        ? incapacitatedResidentPatch(resident, profile.recoveryEligibleAt, now)
+      : nextResidentPatch(resident, now);
     if (patch) {
       await ctx.db.patch(resident._id, patch);
       updated++;
       if (patch.status === 'walking') walking++;
-      else resting++;
+      else if (patch.status !== 'incapacitated' && patch.status !== 'deceased') resting++;
     }
     profilesSynced += await syncQinglanResidentProfile(ctx, args.worldId, {
       ...resident,
@@ -376,6 +395,8 @@ async function tickQinglanResidentsHandler(
     updated,
     walking,
     resting,
+    incapacitated,
+    deceased,
     profilesSynced,
     truncated: residents.length === MAX_QINGLAN_SURFACE_RESIDENTS,
     now,
@@ -475,7 +496,7 @@ function toRenderableResident(resident: {
   };
 }
 
-type ResidentPatch = {
+export type ResidentPatch = {
   displayTile?: TilePoint;
   targetTile?: TilePoint;
   finalTargetTile?: TilePoint;
@@ -490,6 +511,89 @@ type ResidentPatch = {
   nextActionAt?: number;
   updatedAt?: number;
 };
+
+const INCAPACITATED_INTENT = '气血耗尽，无法行动，正等待伤势稳定。';
+const DECEASED_INTENT = '寿元已尽，安然坐化。';
+
+export function deceasedResidentPatch(
+  resident: Pick<
+    Doc<'qinglanResidents'>,
+    | 'status'
+    | 'targetTile'
+    | 'finalTargetTile'
+    | 'pathTiles'
+    | 'emoji'
+    | 'currentIntent'
+    | 'activityLabel'
+    | 'nextActionAt'
+  >,
+  now: number,
+): ResidentPatch | null {
+  const alreadyStopped =
+    resident.status === 'deceased' &&
+    resident.targetTile === undefined &&
+    resident.finalTargetTile === undefined &&
+    resident.pathTiles === undefined &&
+    resident.emoji === '🕯️' &&
+    resident.currentIntent === DECEASED_INTENT &&
+    resident.activityLabel === '已坐化' &&
+    resident.nextActionAt === undefined;
+  if (alreadyStopped) return null;
+  return {
+    targetTile: undefined,
+    finalTargetTile: undefined,
+    pathTiles: undefined,
+    status: 'deceased',
+    emoji: '🕯️',
+    currentIntent: DECEASED_INTENT,
+    activityLabel: '已坐化',
+    nextActionAt: undefined,
+    updatedAt: now,
+  };
+}
+
+/**
+ * Stops a fixed-route Qinglan resident without changing its confirmed tile.
+ * Returning null once stable keeps the background tick sparse and idempotent.
+ */
+export function incapacitatedResidentPatch(
+  resident: Pick<
+    Doc<'qinglanResidents'>,
+    | 'status'
+    | 'targetTile'
+    | 'finalTargetTile'
+    | 'pathTiles'
+    | 'emoji'
+    | 'currentIntent'
+    | 'activityLabel'
+    | 'nextActionAt'
+  >,
+  recoveryEligibleAt: number | undefined,
+  now: number,
+): ResidentPatch | null {
+  const nextActionAt = recoveryEligibleAt ?? resident.nextActionAt;
+  const alreadyStopped =
+    resident.status === 'incapacitated' &&
+    resident.targetTile === undefined &&
+    resident.finalTargetTile === undefined &&
+    resident.pathTiles === undefined &&
+    resident.emoji === '🩹' &&
+    resident.currentIntent === INCAPACITATED_INTENT &&
+    resident.activityLabel === '失能' &&
+    resident.nextActionAt === nextActionAt;
+  if (alreadyStopped) return null;
+  return {
+    targetTile: undefined,
+    finalTargetTile: undefined,
+    pathTiles: undefined,
+    status: 'incapacitated',
+    emoji: '🩹',
+    currentIntent: INCAPACITATED_INTENT,
+    activityLabel: '失能',
+    nextActionAt,
+    updatedAt: now,
+  };
+}
 
 function nextResidentPatch(resident: Doc<'qinglanResidents'>, now: number): ResidentPatch | null {
   const elapsedSinceUpdate = now - resident.updatedAt;
@@ -1144,6 +1248,8 @@ function activityLabelFor(status: string) {
     arranging_herbs: '理药',
     carrying: '搬货',
     waiting: '等候',
+    incapacitated: '失能',
+    deceased: '已坐化',
   };
   return labels[status] ?? '停留';
 }
@@ -1159,6 +1265,8 @@ function emojiForStatus(status: ResidentStatus) {
     arranging_herbs: '🌿',
     carrying: '📦',
     waiting: '…',
+    incapacitated: '🩹',
+    deceased: '🕯️',
   };
   return emojis[status] ?? '';
 }
@@ -1237,11 +1345,45 @@ async function upsertResident(
     .query('qinglanResidents')
     .withIndex('byResident', (q) => q.eq('worldId', worldId).eq('residentId', resident.residentId))
     .first();
-  if (existing) await ctx.db.patch(existing._id, resident);
-  else await ctx.db.insert('qinglanResidents', { worldId, ...resident });
+  const profile = await ctx.db
+    .query('xianxiaProfiles')
+    .withIndex('actor', (q) => q.eq('worldId', worldId).eq('actorId', resident.actorId))
+    .first();
+  if (!existing) {
+    const inserted = await ctx.db.insert('qinglanResidents', { worldId, ...resident });
+    if (profile && isActorDeceased(profile)) {
+      const insertedResident = await ctx.db.get(inserted);
+      const stopped = insertedResident ? deceasedResidentPatch(insertedResident, Date.now()) : null;
+      if (stopped) await ctx.db.patch(inserted, stopped);
+    }
+    return;
+  }
+  if (profile && isActorDeceased(profile)) {
+    const stopped = deceasedResidentPatch(existing, Date.now());
+    await ctx.db.patch(existing._id, {
+      name: resident.name,
+      role: resident.role,
+      character: resident.character,
+      mapId: resident.mapId,
+      ...(stopped ?? {}),
+    });
+    return;
+  }
+  if (!profile || !isActorIncapacitated(profile.health)) {
+    await ctx.db.patch(existing._id, resident);
+    return;
+  }
+  const stopped = incapacitatedResidentPatch(existing, profile.recoveryEligibleAt, Date.now());
+  await ctx.db.patch(existing._id, {
+    name: resident.name,
+    role: resident.role,
+    character: resident.character,
+    mapId: resident.mapId,
+    ...(stopped ?? {}),
+  });
 }
 
-async function ensureQinglanSurfaceSeeded(ctx: MutationCtx, worldId: Id<'worlds'>) {
+export async function ensureQinglanSurfaceSeeded(ctx: MutationCtx, worldId: Id<'worlds'>) {
   for (const zone of QINGLAN_FANGSHI_ZONES) {
     await upsertLocation(ctx, worldId, toQinglanLocationPayload(zone));
   }
@@ -1286,7 +1428,7 @@ async function syncQinglanResidentProfile(
     .withIndex('actor', (q) => q.eq('worldId', worldId).eq('actorId', resident.actorId))
     .first();
   if (existing) {
-    await ctx.db.patch(existing._id, qinglanResidentProfilePatch(existing, resident));
+    await ctx.db.patch(existing._id, qinglanResidentProfileSyncPatch(existing, resident));
   } else {
     await ctx.db.insert('xianxiaProfiles', {
       worldId,

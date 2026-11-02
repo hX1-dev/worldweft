@@ -63,14 +63,23 @@ export function godotSettlementPreview(effects: unknown) {
   const transfers = items
     .map((item) => itemTransferPreview(item))
     .filter((item): item is NonNullable<ReturnType<typeof itemTransferPreview>> => item !== null);
-  if (transfers.length === 0) return undefined;
+  const healthDelta =
+    typeof source.health === 'number' && Number.isFinite(source.health) && source.health !== 0
+      ? source.health
+      : undefined;
+  if (transfers.length === 0 && healthDelta === undefined) return undefined;
+  const summaryParts = transfers.map((transfer) => transfer.line);
+  if (healthDelta !== undefined) {
+    summaryParts.push(`Health ${healthDelta > 0 ? '+' : ''}${healthDelta}`);
+  }
 
   return {
     presentationSource: 'rule_template',
     previewOnly: false,
-    durableSource: 'rules.effects.items',
-    summary: transfers.map((transfer) => transfer.line).join(' | '),
+    durableSource: healthDelta === undefined ? 'rules.effects.items' : 'rules.effects',
+    summary: summaryParts.join(' | '),
     transfers,
+    healthDelta,
     policy: {
       convexAuthored: true,
       godotMayDisplayOnly: true,
@@ -482,6 +491,8 @@ function bubbleTextFor(input: GodotPresentationInput & { warning: boolean }) {
       return '抵达此地。';
     case 'travel_started':
       return '动身前往。';
+    case 'healing_item_used':
+      return '服丹疗伤。';
     case 'agent_skipped':
       return '静候时机。';
     default:
@@ -547,6 +558,8 @@ function displayTextFor(
       return '脚步落定，已到此处。';
     case 'travel_started':
       return '衣袂一振，动身前往。';
+    case 'healing_item_used':
+      return '丹药化开，伤势稍稍稳定。';
     case 'agent_skipped':
       return '按本分行事，暂不另起波澜。';
     default:
@@ -564,6 +577,7 @@ function actionTypeFromEvent(eventType: string) {
   if (eventType.includes('cultivation')) return 'cultivate';
   if (eventType.includes('breakthrough')) return 'breakthrough';
   if (eventType.includes('exploration')) return 'explore';
+  if (eventType.includes('item_used')) return 'use_item';
   if (eventType.includes('arriv')) return 'arrive';
   return '';
 }
@@ -580,6 +594,7 @@ function isRejectedCode(resultCode: string) {
     'missing_target',
     'no_body',
     'not_implemented',
+    'actor_incapacitated',
     'location_forbids_cultivate',
     'mood_too_low',
     'insufficient_cultivation',
@@ -589,7 +604,11 @@ function isRejectedCode(resultCode: string) {
     'master_not_qualified',
     'relationship_insufficient',
     'reputation_too_low',
+    'unknown_item',
+    'item_not_healing',
     'item_not_owned',
+    'health_already_full',
+    'use_item_self_only',
     'actor_lacks_item',
     'merchant_lacks_item',
     'insufficient_funds',

@@ -13,10 +13,21 @@ godot-taixu-client/          Godot project, client contracts, tools, and docs
 convex/godot*.ts             bridge contract, read models, and projections
 convex/http.ts               authenticated /godot/* HTTP transport
 convex/godotTesting.ts       restricted godot_smoke_* fixtures
-convex/xianxia/              rule/action/tick modules reached by the bridge
+convex/xianxia/              rule/action/tick, life, and dialogue modules
+convex/vendor/, packages/humanlike-agent-core/src/boundedTurn.ts
+                             bounded model turn used only by the A/B DeepSeek arm
+data/                        reference-world spatial data and generated valley data
+public/assets/maps/qinglan/chunks/qinglan_valley_gate/*.json
+scripts/buildQinglanValleyGatePrototype.mjs
+                             valley JSON sources and the builder whose
+                             --convex-data-only output is checked by a test
 tsconfig.godot-bridge.json   focused TypeScript boundary
-package.json                 godot:* verification entry points
+package.json                 godot:*, life:*, and dialogue:* entry points
 ```
+
+The release list in `tools/check_source_boundary.mjs` is generated from these
+paths when the base is synced from upstream, so every file there is checked
+for presence, ignore rules, and embedded bridge credentials.
 
 The old Web/Pixi client, `FrameRonin-main/`, `godot-master/`,
 `godot-zongmen-prototype/`, unrelated editor tools, and map-production source

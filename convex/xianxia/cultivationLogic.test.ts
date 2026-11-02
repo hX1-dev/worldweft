@@ -4,6 +4,7 @@ import {
   BOND_THRESHOLD,
   type BondPair,
 } from './cultivationLogic';
+import { isAutonomousGrowthEligible } from './growth';
 
 // 自主成长纯逻辑单测（鬼谷仿造 · G）：背景修为涓流、运行时关系缔结。
 
@@ -17,6 +18,15 @@ const gain = (over: Partial<Parameters<typeof autoCultivationGain>[0]> = {}) =>
     phaseBonus: 0,
     ...over,
   });
+
+describe('自主成长生命状态门禁', () => {
+  test('健康和受伤角色仍可成长，气血归零者不可获得后台修为或关系', () => {
+    expect(isAutonomousGrowthEligible({ health: 10 })).toBe(true);
+    expect(isAutonomousGrowthEligible({ health: 3 })).toBe(true);
+    expect(isAutonomousGrowthEligible({ health: 0 })).toBe(false);
+    expect(isAutonomousGrowthEligible({ health: 10, lifeStatus: 'deceased' })).toBe(false);
+  });
+});
 
 describe('autoCultivationGain（背景修为涓流）', () => {
   test('人人至少有 1 点进益（守职者也不停滞）', () => {
