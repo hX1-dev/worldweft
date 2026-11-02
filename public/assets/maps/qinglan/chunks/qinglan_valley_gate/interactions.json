@@ -1,0 +1,103 @@
+{
+  "mapId": "qinglan_valley_gate",
+  "points": [
+    {
+      "id": "west_return_portal",
+      "name": "返回青岚坊市",
+      "kind": "portal",
+      "tile": {
+        "x": 1,
+        "y": 18
+      },
+      "locationId": "valley_west_entry",
+      "actions": [
+        "travel"
+      ],
+      "portal": {
+        "status": "available",
+        "destinationMapId": "qinglan",
+        "destinationLocationId": "market_west_gate"
+      }
+    },
+    {
+      "id": "rest_campfire",
+      "name": "篝火歇息",
+      "kind": "rest",
+      "tile": {
+        "x": 11,
+        "y": 10
+      },
+      "locationId": "rest_clearing",
+      "actions": [
+        "rest",
+        "talk"
+      ]
+    },
+    {
+      "id": "bridge_inscription",
+      "name": "桥栏刻字",
+      "kind": "inspect",
+      "tile": {
+        "x": 24,
+        "y": 18
+      },
+      "locationId": "creek_bridge",
+      "actions": [
+        "inspect"
+      ],
+      "inspection": {
+        "observationId": "valley_bridge_inscription_v1",
+        "revision": 1,
+        "observation": "桥栏刻字提示木桥狭窄，往来者应依次通行。"
+      }
+    },
+    {
+      "id": "dew_herb_patch",
+      "name": "凝露草",
+      "kind": "resource",
+      "tile": {
+        "x": 17,
+        "y": 28
+      },
+      "locationId": "herb_meadow",
+      "actions": [
+        "gather"
+      ]
+    },
+    {
+      "id": "sealed_shrine_door",
+      "name": "古祠封印",
+      "kind": "seal",
+      "tile": {
+        "x": 38,
+        "y": 12
+      },
+      "locationId": "sealed_shrine",
+      "actions": [
+        "inspect"
+      ],
+      "inspection": {
+        "observationId": "valley_sealed_shrine_door_v1",
+        "revision": 1,
+        "observation": "封印纹路仍然完整，门扉目前无法开启。"
+      }
+    },
+    {
+      "id": "mist_gate_portal",
+      "name": "进入溪谷深处",
+      "kind": "portal",
+      "tile": {
+        "x": 46,
+        "y": 18
+      },
+      "locationId": "mist_gate",
+      "actions": [
+        "travel"
+      ],
+      "portal": {
+        "status": "unavailable",
+        "reasonCode": "portal_destination_unavailable"
+      }
+    }
+  ]
+}

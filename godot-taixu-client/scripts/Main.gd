@@ -578,6 +578,15 @@ func _on_capabilities_received(payload: Dictionary) -> void:
 		return
 	_hide_action_confirmation()
 	latest_capabilities = payload
+	var actor_state = payload.get("actorState", {})
+	if player != null and typeof(actor_state) == TYPE_DICTIONARY and not actor_state.is_empty():
+		var incapacitated := str(actor_state.get("lifeState", "")) == "incapacitated"
+		player.set_movement_enabled(not incapacitated)
+		if incapacitated:
+			# A stopped player cannot trigger movement-based refreshes. Poll sparsely so
+			# the server's timed recovery can re-enable control without a manual click.
+			_queue_capabilities_refresh(1.0)
+	_update_status()
 	_rebuild_action_menu()
 	_update_action_buttons()
 
@@ -658,7 +667,14 @@ func _update_status() -> void:
 	var mask_type := "loading"
 	if navigation_mask != null and navigation_mask.is_loaded():
 		mask_type = navigation_mask.get_mask_type_for_tile(player.current_tile_point())
-	status_label.text = "Convex " + bridge.base_url + " | world " + _short_world_id() + " | player tile %d,%d | %s" % [tile.x, tile.y, mask_type]
+	var fatigue_status := ""
+	var actor_state = latest_capabilities.get("actorState", {})
+	if typeof(actor_state) == TYPE_DICTIONARY and actor_state.has("fatigue"):
+		fatigue_status = " | fatigue %d/100 (%s)" % [
+			int(actor_state.get("fatigue", 0)),
+			str(actor_state.get("fatigueBand", "rested")),
+		]
+	status_label.text = "Convex " + bridge.base_url + " | world " + _short_world_id() + " | player tile %d,%d | %s%s" % [tile.x, tile.y, mask_type, fatigue_status]
 	status_label.tooltip_text = status_label.text
 
 func _update_selected_label() -> void:
@@ -873,6 +889,12 @@ func _refresh_action_detail_from_menu() -> void:
 	var breakthrough_text := _breakthrough_detail_text(_menu_capability("breakthrough"))
 	if breakthrough_text != "":
 		sections.append(breakthrough_text)
+	var cultivation_text := _cultivation_detail_text(_menu_capability("cultivate"))
+	if cultivation_text != "":
+		sections.append(cultivation_text)
+	var use_item_text := _use_item_detail_text(_menu_capability("use_item"))
+	if use_item_text != "":
+		sections.append(use_item_text)
 	_update_action_detail(sections)
 
 func _update_action_detail(sections: Array) -> void:
@@ -898,6 +920,12 @@ func _spar_detail_text(capability: Dictionary) -> String:
 	return _formatted_action_detail(capability)
 
 func _breakthrough_detail_text(capability: Dictionary) -> String:
+	return _formatted_action_detail(capability)
+
+func _cultivation_detail_text(capability: Dictionary) -> String:
+	return _formatted_action_detail(capability)
+
+func _use_item_detail_text(capability: Dictionary) -> String:
 	return _formatted_action_detail(capability)
 
 func _formatted_action_detail(capability: Dictionary) -> String:

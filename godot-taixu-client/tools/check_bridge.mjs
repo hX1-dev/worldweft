@@ -45,6 +45,8 @@ function assert(condition, message) {
   }
 }
 
+const sleep = (ms) => new Promise((resolvePromise) => setTimeout(resolvePromise, ms));
+
 function asObject(value, label) {
   assert(value && typeof value === 'object' && !Array.isArray(value), `${label} must be an object`);
   return value;
@@ -635,6 +637,39 @@ async function postActionAndAssertReadback(payload, label, expectedIdempotentRep
   }
   console.log(`ok ${label} read-after-write: ${matchingEvent.summary}`);
   return action;
+}
+
+async function completeStartedExecution(started, payload, label) {
+  const goal = asObject(started.executionGoal, `${label}.executionGoal`);
+  assert(started.resultCode === 'action_execution_started', `${label} must start execution`);
+  assert(goal.actionType === payload.type, `${label} execution type must match payload`);
+  assert(goal.durationMs > 0, `${label} duration must be positive`);
+  const base = {
+    executionId: goal.executionId,
+    revision: goal.revision,
+    actorId: payload.actorId,
+    executorId: 'godot_bridge_smoke_executor_v1',
+    mapId: payload.mapId,
+    positionTiles: payload.actorTile,
+  };
+  const accepted = await requestJson('/godot/actionExecutionReport', {
+    method: 'POST',
+    body: JSON.stringify({ ...base, status: 'accepted', reportedAt: Date.now() }),
+  });
+  assert(accepted.ok === true, `${label} accepted report must succeed`);
+  const acting = await requestJson('/godot/actionExecutionReport', {
+    method: 'POST',
+    body: JSON.stringify({ ...base, status: 'acting', reportedAt: Date.now() }),
+  });
+  assert(acting.ok === true, `${label} acting report must succeed`);
+  await sleep(Number(goal.durationMs) + 75);
+  const completed = await requestJson('/godot/actionExecutionReport', {
+    method: 'POST',
+    body: JSON.stringify({ ...base, status: 'completed', reportedAt: Date.now() }),
+  });
+  assert(completed.ok === true, `${label} completed report must succeed`);
+  assert(completed.execution?.status === 'completed', `${label} must reach completed`);
+  return await postActionAndAssertReadback(payload, `${label} terminal replay`, true);
 }
 
 async function postLegacyAndAssertReadback(path, payload, label, expectedActionType) {
@@ -1328,6 +1363,11 @@ function assertTeachingCapability(teaching) {
     teaching.actorReputation >= teaching.minimumReputation,
     'enabled request_teaching must satisfy reputation requirement',
   );
+  assert(teaching.durationMs === 6000, 'request_teaching must expose its 6000ms execution duration');
+  assert(
+    teaching.teachingTopic === 'cultivation_fundamentals',
+    'request_teaching must expose the server-known teaching topic',
+  );
   assertRiskPreview(teaching, 'request_teaching capability', [
     'teaching_granted',
     'teaching_refused',
@@ -1689,6 +1729,11 @@ function assertSettlementPreviewMatchesEffects(source, effects, label) {
   if (itemTransfers.length === 0) {
     return '';
   }
+  const healthDelta =
+    typeof effects?.health === 'number' && Number.isFinite(effects.health) && effects.health !== 0
+      ? effects.health
+      : undefined;
+  const durableSource = healthDelta === undefined ? 'rules.effects.items' : 'rules.effects';
   const preview = asObject(source?.settlementPreview, `${label}.settlementPreview`);
   assert(
     preview.presentationSource === 'rule_template',
@@ -1699,8 +1744,12 @@ function assertSettlementPreviewMatchesEffects(source, effects, label) {
     `${label} settlementPreview must not be preview-only after action resolution`,
   );
   assert(
-    preview.durableSource === 'rules.effects.items',
+    preview.durableSource === durableSource,
     `${label} settlementPreview must identify durable effects source`,
+  );
+  assert(
+    preview.healthDelta === healthDelta,
+    `${label} settlementPreview healthDelta must mirror result effects`,
   );
   assert(
     typeof preview.summary === 'string' && preview.summary.length > 0,
@@ -1746,17 +1795,17 @@ function assertSettlementPreviewMatchesEffects(source, effects, label) {
     policy.durableSummaryLocked === true,
     `${label} settlementPreview must lock durable summary`,
   );
-  return preview.summary;
+  return { summary: preview.summary, durableSource };
 }
 
-function assertSettlementPreviewMatchesSummary(source, expectedSummary, label) {
+function assertSettlementPreviewMatchesSummary(source, expected, label) {
   const preview = asObject(source?.settlementPreview, `${label}.settlementPreview`);
   assert(
-    preview.summary === expectedSummary,
+    preview.summary === expected.summary,
     `${label} settlementPreview summary must match action response`,
   );
   assert(
-    preview.durableSource === 'rules.effects.items',
+    preview.durableSource === expected.durableSource,
     `${label} settlementPreview durableSource must match`,
   );
 }
@@ -2122,6 +2171,354 @@ async function assertBreakthroughDisabled(worldId, location) {
   );
   assertRiskPreview(breakthrough, 'disabled breakthrough capability');
   console.log(`ok capabilities negative: breakthrough disabled (${breakthrough.reason})`);
+}
+
+function normalizedHealingProfile(value, label) {
+  const profile = asObject(value, label);
+  const inventory = asArray(profile.inventory ?? [], `${label}.inventory`)
+    .map((item) => ({
+      itemId: String(item?.itemId ?? ''),
+      qty: Number(item?.qty ?? 0),
+    }))
+    .filter((item) => item.itemId.length > 0 && item.qty > 0)
+    .sort((a, b) => a.itemId.localeCompare(b.itemId));
+  return {
+    health: Number(profile.health),
+    maxHealth: Number(profile.maxHealth),
+    inventory,
+  };
+}
+
+function healingInventoryQty(profile, itemId) {
+  return profile.inventory.find((item) => item.itemId === itemId)?.qty ?? 0;
+}
+
+function assertHealingProfile(inspection, expected, label) {
+  const profile = normalizedHealingProfile(inspection.profile, `${label}.profile`);
+  assert(profile.health === expected.health, `${label} health must be ${expected.health}`);
+  assert(profile.maxHealth === 10, `${label} maxHealth must remain 10`);
+  for (const [itemId, qty] of Object.entries(expected.inventory)) {
+    assert(
+      healingInventoryQty(profile, itemId) === qty,
+      `${label} ${itemId} quantity must be ${qty}`,
+    );
+  }
+  const expectedItems = Object.entries(expected.inventory)
+    .filter(([, qty]) => qty > 0)
+    .map(([itemId, qty]) => ({ itemId, qty }))
+    .sort((a, b) => a.itemId.localeCompare(b.itemId));
+  assert(
+    JSON.stringify(profile.inventory) === JSON.stringify(expectedItems),
+    `${label} inventory must exactly match ${JSON.stringify(expectedItems)}`,
+  );
+  return profile;
+}
+
+function assertSingleHealingLifecycle(inspection, clientActionId, action, expected, label) {
+  const lifecycle = asArray(inspection.lifecycles, `${label}.lifecycles`).find(
+    (entry) => entry?.clientActionId === clientActionId,
+  );
+  assert(lifecycle, `${label} must include lifecycle ${clientActionId}`);
+  assert(lifecycle.actionRecordCount === 1, `${label} must have exactly one ActionRecord`);
+  assert(lifecycle.eventCount === 1, `${label} must have exactly one linked WorldEvent`);
+  const records = asArray(lifecycle.records, `${label}.records`);
+  assert(records.length === 1, `${label} must inspect exactly one ActionRecord`);
+  const record = records[0];
+  assert(
+    String(record.actionRecordId) === String(action.actionRecordId),
+    `${label} ActionRecord id must match the bridge response`,
+  );
+  assert(record.type === 'use_item', `${label} ActionRecord type must be use_item`);
+  assert(record.status === expected.status, `${label} status must be ${expected.status}`);
+  assert(
+    record.resultCode === expected.resultCode,
+    `${label} resultCode must be ${expected.resultCode}`,
+  );
+  const eventIds = asArray(record.eventIds, `${label}.eventIds`).map(String);
+  assert(
+    eventIds.length === 1 && eventIds[0] === String(action.eventId),
+    `${label} linked WorldEvent id must match the bridge response`,
+  );
+  return record;
+}
+
+async function primeHealingCandidate(scenario, worldId, locationId) {
+  const result = await convexClient.mutation(api.godotTesting.primeGodotHealingCandidate, {
+    actorId,
+    scenario,
+    mapId,
+    locationId,
+  });
+  assert(result.worldId === worldId, `${scenario} healing fixture must preserve worldId`);
+  assert(result.actorId === actorId, `${scenario} healing fixture must use the smoke actor`);
+  assert(result.scenario === scenario, `${scenario} healing fixture must echo its scenario`);
+  assert(result.maxHealth === 10, `${scenario} healing fixture must use maxHealth 10`);
+  return result;
+}
+
+async function inspectHealingFixture(worldId, clientActionIds) {
+  const result = await convexClient.query(api.godotTesting.inspectGodotHealingFixture, {
+    actorId,
+    clientActionIds,
+  });
+  assert(result.worldId === worldId, 'healing fixture inspection must preserve worldId');
+  assert(result.actorId === actorId, 'healing fixture inspection must use the smoke actor');
+  return result;
+}
+
+function healingActionPayload(worldId, locationId, clientActionId, itemId) {
+  return {
+    worldId,
+    actorId,
+    clientActionId,
+    type: 'use_item',
+    mapId,
+    locationId,
+    intent: `Use ${itemId} in the real Convex healing transaction check.`,
+    params: { itemId },
+    metadata: {
+      test: 'godot-taixu-client/tools/check_bridge.mjs',
+      purpose: 'healing_transaction_acceptance',
+    },
+  };
+}
+
+function assertHealingEffect(action, expectedHealth, label) {
+  assert(action.result?.status === 'applied', `${label} must be applied`);
+  assert(action.resultCode === 'healing_item_used', `${label} must use healing_item_used`);
+  const effects = asObject(action.result?.effects, `${label}.effects`);
+  assert(effects.health === expectedHealth, `${label} health effect must be ${expectedHealth}`);
+  const transfers = asArray(effects.items, `${label}.effects.items`);
+  assert(transfers.length === 1, `${label} must contain one item consumption`);
+  assert(
+    transfers[0]?.from === actorId &&
+      transfers[0]?.to === undefined &&
+      transfers[0]?.itemId === 'healing_pill' &&
+      transfers[0]?.qty === 1,
+    `${label} must consume exactly one healing_pill from the acting actor`,
+  );
+}
+
+async function assertHealingTransactions(worldId, locationId) {
+  await primeHealingCandidate('injured_two_pills', worldId, locationId);
+  const sequentialKey = newClientActionId('use-item-sequential');
+  const sequentialPayload = healingActionPayload(
+    worldId,
+    locationId,
+    sequentialKey,
+    'healing_pill',
+  );
+  const sequentialAction = await postActionAndAssertReadback(
+    sequentialPayload,
+    'healing item transaction',
+  );
+  assertHealingEffect(sequentialAction, 3, 'healing item transaction');
+  let inspection = await inspectHealingFixture(worldId, [sequentialKey]);
+  assertHealingProfile(
+    inspection,
+    { health: 7, inventory: { healing_pill: 1 } },
+    'healing item transaction',
+  );
+  assertSingleHealingLifecycle(
+    inspection,
+    sequentialKey,
+    sequentialAction,
+    { status: 'applied', resultCode: 'healing_item_used' },
+    'healing item transaction',
+  );
+
+  const sequentialReplay = await postActionAndAssertReadback(
+    sequentialPayload,
+    'healing item sequential replay',
+    true,
+  );
+  assert(
+    sequentialReplay.actionRecordId === sequentialAction.actionRecordId &&
+      sequentialReplay.eventId === sequentialAction.eventId,
+    'healing item sequential replay must return the original lifecycle',
+  );
+  inspection = await inspectHealingFixture(worldId, [sequentialKey]);
+  const afterSequentialReplay = assertHealingProfile(
+    inspection,
+    { health: 7, inventory: { healing_pill: 1 } },
+    'healing item sequential replay',
+  );
+  assertSingleHealingLifecycle(
+    inspection,
+    sequentialKey,
+    sequentialReplay,
+    { status: 'applied', resultCode: 'healing_item_used' },
+    'healing item sequential replay',
+  );
+
+  const conflictingItem = await requestJsonAllowError('/godot/action', {
+    method: 'POST',
+    body: JSON.stringify({ ...sequentialPayload, params: { itemId: 'qi_pill' } }),
+  });
+  assert(conflictingItem.response.status === 409, 'same healing key with changed item must return 409');
+  assert(
+    conflictingItem.payload.errorCode === 'action_idempotency_conflict',
+    'same healing key with changed item must expose action_idempotency_conflict',
+  );
+  inspection = await inspectHealingFixture(worldId, [sequentialKey]);
+  const afterConflict = assertHealingProfile(
+    inspection,
+    { health: 7, inventory: { healing_pill: 1 } },
+    'healing item semantic conflict',
+  );
+  assert(
+    JSON.stringify(afterConflict) === JSON.stringify(afterSequentialReplay),
+    'healing item semantic conflict must not mutate health or inventory',
+  );
+  assertSingleHealingLifecycle(
+    inspection,
+    sequentialKey,
+    sequentialAction,
+    { status: 'applied', resultCode: 'healing_item_used' },
+    'healing item semantic conflict',
+  );
+
+  await primeHealingCandidate('injured_two_pills', worldId, locationId);
+  const concurrentKey = newClientActionId('use-item-concurrent');
+  const concurrentPayload = healingActionPayload(
+    worldId,
+    locationId,
+    concurrentKey,
+    'healing_pill',
+  );
+  const concurrentResults = await Promise.all(
+    Array.from({ length: 4 }, () =>
+      requestJson('/godot/action', {
+        method: 'POST',
+        body: JSON.stringify(concurrentPayload),
+      }),
+    ),
+  );
+  const concurrentRecordIds = new Set(concurrentResults.map((result) => result.actionRecordId));
+  const concurrentEventIds = new Set(concurrentResults.map((result) => result.eventId));
+  assert(concurrentRecordIds.size === 1, 'concurrent healing retries must share one ActionRecord');
+  assert(concurrentEventIds.size === 1, 'concurrent healing retries must share one WorldEvent');
+  assert(
+    concurrentResults.filter((result) => result.idempotentReplay === false).length === 1 &&
+      concurrentResults.filter((result) => result.idempotentReplay === true).length === 3,
+    'four concurrent healing retries must contain one settlement and three replays',
+  );
+  for (const result of concurrentResults) {
+    assertHealingEffect(result, 3, 'concurrent healing retry');
+  }
+  const concurrentAction =
+    concurrentResults.find((result) => result.idempotentReplay === false) ?? concurrentResults[0];
+  await assertActionRecordReadback(
+    concurrentAction,
+    concurrentPayload,
+    'concurrent healing retry',
+    'use_item',
+  );
+  inspection = await inspectHealingFixture(worldId, [concurrentKey]);
+  assertHealingProfile(
+    inspection,
+    { health: 7, inventory: { healing_pill: 1 } },
+    'concurrent healing retry',
+  );
+  assertSingleHealingLifecycle(
+    inspection,
+    concurrentKey,
+    concurrentAction,
+    { status: 'applied', resultCode: 'healing_item_used' },
+    'concurrent healing retry',
+  );
+
+  await primeHealingCandidate('near_max_one_pill', worldId, locationId);
+  const cappedKey = newClientActionId('use-item-capped');
+  const cappedPayload = healingActionPayload(worldId, locationId, cappedKey, 'healing_pill');
+  const cappedAction = await postActionAndAssertReadback(cappedPayload, 'capped healing item');
+  assertHealingEffect(cappedAction, 1, 'capped healing item');
+  inspection = await inspectHealingFixture(worldId, [cappedKey]);
+  assertHealingProfile(
+    inspection,
+    { health: 10, inventory: { healing_pill: 0 } },
+    'capped healing item',
+  );
+  assertSingleHealingLifecycle(
+    inspection,
+    cappedKey,
+    cappedAction,
+    { status: 'applied', resultCode: 'healing_item_used' },
+    'capped healing item',
+  );
+
+  const rejectedCases = [
+    {
+      scenario: 'full_one_pill',
+      itemId: 'healing_pill',
+      resultCode: 'health_already_full',
+      health: 10,
+      inventory: { healing_pill: 1 },
+    },
+    {
+      scenario: 'injured_no_pill',
+      itemId: 'healing_pill',
+      resultCode: 'item_not_owned',
+      health: 4,
+      inventory: {},
+    },
+    {
+      scenario: 'injured_wrong_item',
+      itemId: 'qi_pill',
+      resultCode: 'item_not_healing',
+      health: 4,
+      inventory: { qi_pill: 1 },
+    },
+    {
+      scenario: 'incapacitated_one_pill',
+      itemId: 'healing_pill',
+      resultCode: 'actor_incapacitated',
+      health: 0,
+      inventory: { healing_pill: 1 },
+    },
+  ];
+  for (const rejected of rejectedCases) {
+    await primeHealingCandidate(rejected.scenario, worldId, locationId);
+    const key = newClientActionId(`use-item-rejected-${rejected.scenario}`);
+    const payload = healingActionPayload(worldId, locationId, key, rejected.itemId);
+    const beforeRejected = await inspectHealingFixture(worldId, []);
+    const beforeProfile = normalizedHealingProfile(
+      beforeRejected.profile,
+      `${rejected.scenario}.before.profile`,
+    );
+    const action = await postActionAndAssertReadback(payload, `rejected ${rejected.scenario}`);
+    assert(action.result?.status === 'rejected', `${rejected.scenario} must be rejected`);
+    assert(
+      action.resultCode === rejected.resultCode,
+      `${rejected.scenario} must return ${rejected.resultCode}`,
+    );
+    const effects = asObject(action.result?.effects, `${rejected.scenario}.effects`);
+    assert(
+      effects.health === undefined && effects.items === undefined,
+      `${rejected.scenario} must not emit health or inventory effects`,
+    );
+    const afterRejected = await inspectHealingFixture(worldId, [key]);
+    const afterProfile = assertHealingProfile(
+      afterRejected,
+      { health: rejected.health, inventory: rejected.inventory },
+      `rejected ${rejected.scenario}`,
+    );
+    assert(
+      JSON.stringify(afterProfile) === JSON.stringify(beforeProfile),
+      `${rejected.scenario} must not mutate health or inventory`,
+    );
+    assertSingleHealingLifecycle(
+      afterRejected,
+      key,
+      action,
+      { status: 'rejected', resultCode: rejected.resultCode },
+      `rejected ${rejected.scenario}`,
+    );
+  }
+
+  console.log(
+    'ok healing transactions: consume, cap, rejection, sequential replay, concurrent replay, and semantic conflict',
+  );
 }
 
 async function primeTeachingCandidate() {
@@ -2798,6 +3195,8 @@ assert(
       tickLease: 1,
       memoryFanoutJob: 1,
       durableSchema: 1,
+      movementProtocol: 1,
+      actionExecutionProtocol: 1,
     }),
   '/godot runtime must advertise the current hardening versions',
 );
@@ -3008,7 +3407,12 @@ const giftPayload = {
   params: asCapabilityParams(capabilityFixtures.gift, 'gift'),
 };
 
-const giftAction = await postActionAndAssertReadback(giftPayload, 'gift action');
+const giftStart = await requestJson('/godot/action', {
+  method: 'POST',
+  body: JSON.stringify(giftPayload),
+});
+assert(giftStart.executionGoal?.durationMs === 2000, 'gift execution duration must be 2000ms');
+const giftAction = await completeStartedExecution(giftStart, giftPayload, 'gift action');
 const profileAfterGift = await getProfile(before.worldId, actorId);
 const contextAfterGift = await assertGiftSocialReadback(
   before.worldId,
@@ -3077,26 +3481,23 @@ const tradePayload = {
   },
 };
 
-await postActionAndAssertReadback(tradePayload, 'trade action');
+const tradeStarted = await requestJson('/godot/action', {
+  method: 'POST',
+  body: JSON.stringify(tradePayload),
+});
+assert(
+  tradeStarted.executionGoal?.durationMs === 3000,
+  `trade execution duration must be 3000ms: ${JSON.stringify(tradeStarted)}`,
+);
+await completeStartedExecution(tradeStarted, tradePayload, 'trade action');
 
-const tradeBackGiftPayload = {
-  ...tradePayload,
-  clientActionId: newClientActionId('trade-replenishment-gift'),
-  type: 'gift',
-  intent: 'Return traded item after bridge smoke test',
-  params: {
-    itemId: String(
-      asObject(multiTradeOption.params, 'trade.options[multi].params').requestedItemId,
-    ),
-  },
-};
-
-for (let i = 0; i < Number(multiTradeOption.requestedQty ?? 1); i += 1) {
-  await postActionAndAssertReadback(
-    { ...tradeBackGiftPayload, clientActionId: newClientActionId(`trade-replenishment-${i + 1}`) },
-    `trade replenishment gift ${i + 1}`,
-  );
-}
+await convexClient.mutation(api.godotTesting.restoreGodotSmokeInventoryTransfer, {
+  fromActorId: actorId,
+  toActorId: tradeTarget.actorId,
+  itemId: String(asObject(multiTradeOption.params, 'trade.options[multi].params').requestedItemId),
+  quantity: Number(multiTradeOption.requestedQty ?? 1),
+});
+console.log('ok trade fixture inventory restored through restricted cleanup, not a fake social action');
 
 const sparPayload = {
   worldId: before.worldId,
@@ -3144,18 +3545,27 @@ await moveSmokeActorToLocation(
   pickLocation(locations, teachingLocationId ?? teachingTarget.locationId),
   'formal move before request_teaching',
 );
-const teachingAction = await postActionAndAssertReadback(
-  teachingPayload,
-  'request_teaching action',
-);
+const teachingStarted = await requestJson('/godot/action', {
+  method: 'POST',
+  body: JSON.stringify(teachingPayload),
+});
 assert(
-  teachingAction.result?.resultCode !== 'master_not_qualified',
+  teachingStarted.resultCode !== 'master_not_qualified',
   'request_teaching capability must not enable an unqualified master',
 );
 assert(
-  teachingAction.result?.resultCode !== 'target_not_present',
+  teachingStarted.resultCode !== 'target_not_present',
   'request_teaching capability must not enable a target outside the current location',
 );
+assert(
+  teachingStarted.executionGoal?.durationMs === 6000,
+  `request_teaching execution duration must be 6000ms: ${JSON.stringify(teachingStarted)}`,
+);
+assert(
+  teachingStarted.executionGoal?.teachingTopic === 'cultivation_fundamentals',
+  'request_teaching execution must preserve its validated topic',
+);
+await completeStartedExecution(teachingStarted, teachingPayload, 'request_teaching action');
 
 const cultivatePayload = {
   worldId: before.worldId,
@@ -3171,7 +3581,11 @@ const cultivatePayload = {
   },
 };
 
-await postActionAndAssertReadback(cultivatePayload, 'cultivate action');
+const cultivateStart = await requestJson('/godot/action', {
+  method: 'POST',
+  body: JSON.stringify(cultivatePayload),
+});
+await completeStartedExecution(cultivateStart, cultivatePayload, 'cultivate action');
 await assertBreakthroughDisabled(before.worldId, breakthroughLocation);
 await primeBreakthroughCandidate(before.worldId, breakthroughLocation);
 const breakthrough = await assertBreakthroughEnabled(before.worldId, breakthroughLocation);
@@ -3192,7 +3606,12 @@ const breakthroughPayload = {
   },
 };
 
-const breakthroughAction = await postActionAndAssertReadback(
+const breakthroughStart = await requestJson('/godot/action', {
+  method: 'POST',
+  body: JSON.stringify(breakthroughPayload),
+});
+const breakthroughAction = await completeStartedExecution(
+  breakthroughStart,
   breakthroughPayload,
   'breakthrough action',
 );
@@ -3280,6 +3699,7 @@ console.log('ok rejected explore preserved durable profile location/intent');
 
 await postTickAndAssert(before.worldId);
 await assertOverlappingTickLease(before.worldId);
+await assertHealingTransactions(before.worldId, arrivalLocation.locationId);
 bridgeCheckPassed = true;
 } finally {
   const cleanupErrors = [];

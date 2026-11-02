@@ -83,6 +83,7 @@ func _init() -> void:
 	arrived_resident["routePreview"]["schedulePreview"]["phase"] = "at_waypoint"
 	_assert_equals(renderer.resident_presence_label(arrived_resident), "Teaching @ Medicine Shop", "arrived presence label")
 	_assert_equals(renderer.resident_presence_label({ "intent": "Watching the west gate" }), "Watching the west gate", "presence intent fallback")
+	_assert_equals(renderer._status_color("incapacitated"), Color(0.72, 0.35, 0.38), "incapacitated status color")
 
 	var empty_points: Array = renderer.route_preview_points({ "routePreview": { "pathTiles": [{ "x": 1.0, "y": 1.0 }] } })
 	_assert_equals(empty_points.size(), 0, "single point route is ignored")

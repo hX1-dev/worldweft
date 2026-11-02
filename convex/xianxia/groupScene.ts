@@ -5,9 +5,14 @@ import { versionDurableEventFacts } from './durableContracts';
 import { planGroupScene, type SceneActor } from './groupSceneLogic';
 import { readClockStartedAt } from './config';
 import { gameTimeAt } from './timeLogic';
+import { isActorIncapacitated } from './lifeStateLogic';
 
 const MAX_GROUP_SCENE_PROFILES = 256;
 const MAX_GROUP_SCENE_LOCATIONS = 128;
+
+export function isGroupSceneActorEligible(profile: { health: number }) {
+  return !isActorIncapacitated(profile.health);
+}
 
 // 群体场景的「接线层」（World Foundation · W4b-F）。纯判定在 groupSceneLogic.ts。
 // 每次世界推进调用：按当前在场人群 + 昼夜，确定性地把晨课/坊市议价/秘境组队
@@ -37,7 +42,7 @@ export const tickGroupScenes = internalMutation({
     // 按语义地点聚集在场角色（无地点者不计入任何场景）。
     const byLoc = new Map<string, SceneActor[]>();
     for (const p of profiles) {
-      if (!p.currentLocationId) continue;
+      if (!p.currentLocationId || !isGroupSceneActorEligible(p)) continue;
       const arr = byLoc.get(p.currentLocationId) ?? [];
       arr.push({ actorId: p.actorId, name: p.name, role: p.role });
       byLoc.set(p.currentLocationId, arr);
@@ -50,7 +55,10 @@ export const tickGroupScenes = internalMutation({
       .order('desc')
       .take(30);
     const firedKey = new Set(
-      recent.map((e) => `${e.locationId}|${(e.facts as { phase?: string })?.phase}|${(e.facts as { gameDay?: number })?.gameDay}`),
+      recent.map(
+        (e) =>
+          `${e.locationId}|${(e.facts as { phase?: string })?.phase}|${(e.facts as { gameDay?: number })?.gameDay}`,
+      ),
     );
 
     let fired = 0;

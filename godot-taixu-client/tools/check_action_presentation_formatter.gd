@@ -125,7 +125,7 @@ func _init() -> void:
 		"type": "spar",
 		"label": "Spar",
 		"enabled": true,
-		"distanceTiles": 2.25,
+		"distanceTiles": 2.24,
 		"rangeTiles": 5.0,
 		"riskPreview": {
 			"level": "low",
@@ -144,6 +144,12 @@ func _init() -> void:
 		"cultivationXp": 88,
 		"breakthroughThreshold": 120,
 		"realmGate": false,
+		"breakthroughElapsedMs": 5 * 86400000,
+		"breakthroughRequiredDwellMs": 12 * 86400000,
+		"breakthroughMaterialItemId": "spirit_stone",
+		"breakthroughMaterialQuantity": 4,
+		"breakthroughMaterialOwned": 3,
+		"durationMs": 10000,
 		"reason": "Minor layer advancement is automatic.",
 		"riskPreview": {
 			"level": "high",
@@ -153,6 +159,76 @@ func _init() -> void:
 			"durableEffects": ["cultivation delta", "injury risk"],
 		},
 	}
+	var healing_option: Dictionary = {
+		"label": "Healing Pill x1",
+		"params": { "itemId": "healing_pill" },
+		"itemId": "healing_pill",
+		"itemName": "Healing Pill",
+		"qtyAvailable": 2,
+		"healValue": 3,
+		"effectiveHeal": 2,
+		"currentHealth": 6,
+		"maxHealth": 8,
+		"inventoryDeltaPreview": {
+			"deltas": [
+				{ "owner": "actor", "itemName": "Healing Pill", "before": 2, "after": 1, "delta": -1 },
+			],
+		},
+		"confirmationPreview": {
+			"summary": "Use one healing pill",
+			"primaryLine": "Healing Pill x1",
+			"balanceLine": "Health 6 -> 8/8",
+			"inventoryLine": "Healing Pill 2 -> 1",
+			"durableEffectNotes": ["consume one pill", "restore 2 health"],
+			"presentationSource": "rule_template",
+			"previewOnly": true,
+			"policy": {
+				"convexAuthored": true,
+				"godotMayDisplayOnly": true,
+				"durableStateUnchanged": true,
+				"submitPath": "POST /godot/action",
+			},
+		},
+	}
+	var use_item_capability: Dictionary = {
+		"type": "use_item",
+		"label": "Use Healing Pill",
+		"enabled": true,
+		"category": "self",
+		"params": { "itemId": "healing_pill" },
+		"currentHealth": 6,
+		"maxHealth": 8,
+		"effectiveHeal": 2,
+		"selectedOption": healing_option,
+	}
+	var cultivation_option: Dictionary = {
+		"label": "Spirit Stone · consume 1",
+		"params": { "cultivationMode": "spirit_stone" },
+		"cultivationMode": "spirit_stone",
+		"itemCost": { "itemId": "spirit_stone", "qty": 1 },
+		"spiritualEnergy": 5,
+		"estimatedXp": { "min": 14, "max": 17 },
+		"durationMs": 8000,
+	}
+	var cultivation_capability: Dictionary = {
+		"type": "cultivate",
+		"label": "Cultivate",
+		"enabled": true,
+		"spiritualEnergy": 5,
+		"durationMs": 8000,
+		"pendantBonus": 0.1,
+		"selectedOption": cultivation_option,
+	}
+	var attack_capability: Dictionary = {
+		"type": "attack", "label": "Attack", "enabled": true, "durationMs": 4000,
+	}
+	var flee_capability: Dictionary = {
+		"type": "flee", "label": "Flee", "enabled": true, "durationMs": 3000,
+	}
+	var loot_capability: Dictionary = {
+		"type": "loot", "label": "Loot", "enabled": true, "durationMs": 3000,
+		"selectedOption": { "label": "spirit_herb · 1 available", "itemId": "spirit_herb", "params": { "itemId": "spirit_herb" } },
+	}
 
 	var trade_detail: String = formatter.detail_text(trade_capability, 1.0, 5.0)
 	var trade_confirmation: String = formatter.confirmation_body(trade_capability, "Medicine Keeper", 1.0, 5.0)
@@ -160,15 +236,36 @@ func _init() -> void:
 	var gift_confirmation: String = formatter.confirmation_body(gift_capability, "Medicine Keeper", 1.0, 5.0)
 	var teaching_detail: String = formatter.detail_text(teaching_capability, 1.0, 5.0)
 	var teaching_confirmation: String = formatter.confirmation_body(teaching_capability, "Elder Mu", 1.0, 5.0)
-	var spar_detail: String = formatter.detail_text(spar_capability, 2.25, 5.0)
-	var spar_confirmation: String = formatter.confirmation_body(spar_capability, "Guard West", 2.25, 5.0)
+	var spar_detail: String = formatter.detail_text(spar_capability, 2.24, 5.0)
+	var spar_confirmation: String = formatter.confirmation_body(spar_capability, "Guard West", 2.24, 5.0)
 	var breakthrough_detail: String = formatter.detail_text(breakthrough_capability, 0.0, 5.0)
 	var breakthrough_confirmation: String = formatter.confirmation_body(breakthrough_capability, "", 0.0, 5.0)
+	var use_item_detail: String = formatter.detail_text(use_item_capability, INF, 5.0)
+	var use_item_confirmation: String = formatter.confirmation_body(use_item_capability, "", INF, 5.0)
+	var cultivation_detail: String = formatter.detail_text(cultivation_capability, 0.0, 5.0)
+	var cultivation_confirmation: String = formatter.confirmation_body(cultivation_capability, "", 0.0, 5.0)
+	var attack_detail: String = formatter.detail_text(attack_capability, 1.25, 5.0)
+	var attack_confirmation: String = formatter.confirmation_body(attack_capability, "Hostile Disciple", 1.25, 5.0)
+	var flee_detail: String = formatter.detail_text(flee_capability, INF, 5.0)
+	var loot_detail: String = formatter.detail_text(loot_capability, 1.25, 5.0)
+	var loot_confirmation: String = formatter.confirmation_body(loot_capability, "Downed Disciple", 1.25, 5.0)
 
 	_assert_equals(formatter.option_label(trade_option), "Spirit Herb x2", "explicit option label")
 	_assert_equals(formatter.option_label({ "itemName": "Fallback Herb" }), "Fallback Herb", "item option fallback")
 	_assert_equals(formatter.confirmation_title(trade_capability), "Confirm Trade", "trade title")
 	_assert_equals(formatter.confirmation_title(breakthrough_capability), "Confirm Breakthrough", "breakthrough title")
+	_assert_equals(formatter.confirmation_title(use_item_capability), "Confirm Use Item", "use item title")
+	_assert_equals(formatter.confirmation_title(cultivation_capability), "Confirm Cultivation", "cultivation title")
+	_assert_equals(formatter.confirmation_title(attack_capability), "Confirm Hostile Attack", "attack title")
+	_assert_equals(formatter.confirmation_title(flee_capability), "Confirm Flee", "flee title")
+	_assert_equals(formatter.confirmation_title(loot_capability), "Confirm Loot", "loot title")
+	_assert_contains(attack_detail, "Attack: 4.0s | distance 1.25/5 tiles | ready | Convex adjudicates outcome", "attack detail")
+	_assert_contains(attack_confirmation, "No damage, escape result, or item transfer is applied until the timed body action completes", "attack completion authority")
+	_assert_contains(flee_detail, "Flee: 3.0s | ready | Convex adjudicates outcome", "flee detail")
+	_assert_contains(loot_detail, "item spirit_herb x1", "loot concrete item")
+	_assert_contains(loot_confirmation, "Target: Downed Disciple", "loot target")
+	_assert_contains(cultivation_detail, "Cultivation: Spirit Stone | 8.0s | spiritual energy 5/10 | XP 14-17 | cost spirit_stone x1 | pendant +10% included | ready", "cultivation detail")
+	_assert_contains(cultivation_confirmation, "only consumed by Convex after the full body duration completes", "cultivation completion authority")
 	_assert_contains(formatter.option_selection_text(trade_option), "Selection: option 2/3 | qty x2 | max x3 | 16 spirit stones | previewOnly | Convex-owned | display-only | durable unchanged until submit", "trade selection helper")
 
 	_assert_contains(trade_detail, "Confirm: Buy Spirit Herb x2 for 16 spirit stones | rule_template | preview", "trade compact preview")
@@ -202,9 +299,20 @@ func _init() -> void:
 	_assert_contains(spar_confirmation, "Risk: low | Spar may affect health and mood.", "spar risk")
 	_assert_contains(spar_confirmation, "Possible: spar_actor_win, spar_actor_lose", "spar result codes")
 
-	_assert_contains(breakthrough_detail, "Breakthrough: qi_refining 9 | XP 88/120 | minor layers auto | Minor layer advancement is automatic.", "breakthrough disabled detail")
+	_assert_contains(breakthrough_detail, "Breakthrough: qi_refining 9 | XP 88/120 | minor layers auto | time 5.0/12 days | cost spirit_stone x4 (owned 3) | 10.0s | Minor layer advancement is automatic.", "breakthrough disabled detail")
 	_assert_contains(breakthrough_detail, "Risk: high | Breakthrough can fail or backfire.", "breakthrough compact risk")
 	_assert_contains(breakthrough_confirmation, "Rules: realm gate | xp threshold", "breakthrough rule gates")
+	_assert_contains(breakthrough_confirmation, "reserved at start and consumed by Convex only after the full body duration completes", "breakthrough completion authority")
+
+	_assert_contains(use_item_detail, "Confirm: Use one healing pill | rule_template | preview", "use item compact preview")
+	_assert_contains(use_item_detail, "Use item: Healing Pill (healing_pill) x1 | inventory 2 -> 1 | health 6 -> 8/8 (+2, up to 3) | ready", "use item detail shows bounded healing and inventory cost")
+	_assert_contains(use_item_detail, "Inventory: You Healing Pill 2 -> 1 (-1)", "use item detail shows inventory delta")
+	_assert_contains(use_item_confirmation, "Convex preview: Use one healing pill", "use item confirmation uses server preview")
+	_assert_contains(use_item_confirmation, "Use Healing Pill (healing_pill) x1.", "use item confirmation identifies item")
+	_assert_contains(use_item_confirmation, "Inventory 2 -> 1", "use item confirmation shows consumption")
+	_assert_contains(use_item_confirmation, "Health 6 -> 8/8 (+2; restores up to 3).", "use item confirmation shows cap and effective heal")
+	_assert_contains(use_item_confirmation, "atomically consume one item", "use item confirmation preserves Convex authority")
+	_assert_contains(use_item_confirmation, "Submit: POST /godot/action", "use item confirmation preserves formal submit path")
 
 	var disabled_trade: String = formatter.detail_text({
 		"type": "trade",
@@ -226,6 +334,8 @@ func _init() -> void:
 		print("TEACHING CONFIRMATION\n" + teaching_confirmation)
 		print("SPAR CONFIRMATION\n" + spar_confirmation)
 		print("BREAKTHROUGH CONFIRMATION\n" + breakthrough_confirmation)
+		print("USE ITEM DETAIL\n" + use_item_detail)
+		print("USE ITEM CONFIRMATION\n" + use_item_confirmation)
 		quit(1)
 
 func _assert_contains(haystack: String, needle: String, label: String) -> void:

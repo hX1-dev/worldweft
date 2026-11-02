@@ -20,8 +20,18 @@ func detail_text(capability: Dictionary, selected_resident_distance: float, inte
 			return teaching_detail_text(capability)
 		"spar":
 			return spar_detail_text(capability, selected_resident_distance, interaction_range_tiles)
+		"attack":
+			return conflict_detail_text(capability, "Attack", selected_resident_distance, interaction_range_tiles)
+		"flee":
+			return conflict_detail_text(capability, "Flee", selected_resident_distance, interaction_range_tiles)
+		"loot":
+			return loot_detail_text(capability, selected_resident_distance, interaction_range_tiles)
 		"breakthrough":
 			return breakthrough_detail_text(capability)
+		"cultivate":
+			return cultivation_detail_text(capability)
+		"use_item":
+			return use_item_detail_text(capability)
 		_:
 			return ""
 
@@ -33,12 +43,28 @@ func confirmation_title(capability: Dictionary) -> String:
 			return "Confirm Gift"
 		"request_teaching":
 			return "Confirm Teaching Request"
+		"accept_request":
+			return "Confirm Request Acceptance"
+		"decline_request":
+			return "Confirm Request Decline"
+		"turn_in_request":
+			return "Confirm Request Turn-in"
 		"spar":
 			return "Confirm Spar"
+		"attack":
+			return "Confirm Hostile Attack"
+		"flee":
+			return "Confirm Flee"
+		"loot":
+			return "Confirm Loot"
 		"breakthrough":
 			return "Confirm Breakthrough"
+		"cultivate":
+			return "Confirm Cultivation"
 		"steal":
 			return "Confirm Risky Action"
+		"use_item":
+			return "Confirm Use Item"
 		_:
 			return "Confirm Action"
 
@@ -55,17 +81,70 @@ func confirmation_body(
 			return gift_confirmation_text(capability, target_name)
 		"request_teaching":
 			return teaching_confirmation_text(capability)
+		"accept_request", "decline_request", "turn_in_request":
+			return str(capability.get("requestSummary", capability.get("intent", "Confirm request action.")))
 		"spar":
 			return spar_confirmation_text(capability, selected_resident_distance, interaction_range_tiles)
+		"attack":
+			return conflict_confirmation_text(capability, "Attack", target_name, selected_resident_distance, interaction_range_tiles)
+		"flee":
+			return conflict_confirmation_text(capability, "Flee", target_name, selected_resident_distance, interaction_range_tiles)
+		"loot":
+			return conflict_confirmation_text(capability, "Loot", target_name, selected_resident_distance, interaction_range_tiles)
 		"breakthrough":
 			return breakthrough_confirmation_text(capability)
+		"cultivate":
+			return cultivation_confirmation_text(capability)
 		"steal":
 			return "This action can create suspicion, grudges, and reputation loss.\nConvex will adjudicate the final outcome."
+		"use_item":
+			return use_item_confirmation_text(capability)
 		_:
 			return action_button_text(capability)
 
 func action_button_text(capability: Dictionary) -> String:
 	return str(capability.get("label", capability.get("type", "Action")))
+
+func conflict_detail_text(
+	capability: Dictionary,
+	label: String,
+	selected_resident_distance: float,
+	interaction_range_tiles: float
+) -> String:
+	if capability.is_empty():
+		return ""
+	var duration_seconds := float(capability.get("durationMs", 0)) / 1000.0
+	var range_text := ""
+	if is_finite(selected_resident_distance):
+		range_text = " | distance %.2f/%.0f tiles" % [selected_resident_distance, interaction_range_tiles]
+	var state := "ready" if bool(capability.get("enabled", false)) else str(capability.get("reason", "unavailable"))
+	return "%s: %.1fs%s | %s | Convex adjudicates outcome" % [label, duration_seconds, range_text, state]
+
+func loot_detail_text(
+	capability: Dictionary,
+	selected_resident_distance: float,
+	interaction_range_tiles: float
+) -> String:
+	var text := conflict_detail_text(capability, "Loot", selected_resident_distance, interaction_range_tiles)
+	var option := selected_action_option(capability)
+	if not option.is_empty():
+		text += " | item %s x1" % str(option.get("itemId", option.get("label", "unknown")))
+	return text
+
+func conflict_confirmation_text(
+	capability: Dictionary,
+	label: String,
+	target_name: String,
+	selected_resident_distance: float,
+	interaction_range_tiles: float
+) -> String:
+	var detail := (
+		loot_detail_text(capability, selected_resident_distance, interaction_range_tiles)
+		if str(capability.get("type", "")) == "loot"
+		else conflict_detail_text(capability, label, selected_resident_distance, interaction_range_tiles)
+	)
+	var target_text := "" if target_name == "" else "\nTarget: " + target_name
+	return detail + target_text + "\nNo damage, escape result, or item transfer is applied until the timed body action completes and Convex revalidates it."
 
 func trade_detail_text(capability: Dictionary) -> String:
 	if capability.is_empty() or str(capability.get("type", "")) != "trade":
@@ -187,15 +266,104 @@ func breakthrough_detail_text(capability: Dictionary) -> String:
 	var threshold := int(capability.get("breakthroughThreshold", 0))
 	var gate := "realm gate" if capability.get("realmGate", false) == true else "minor layers auto"
 	var state := "ready" if capability.get("enabled", false) == true else str(capability.get("reason", "blocked"))
-	var text := "Breakthrough: %s | XP %d/%d | %s | %s" % [
+	var elapsed_days := float(capability.get("breakthroughElapsedMs", 0)) / 86400000.0
+	var required_days := float(capability.get("breakthroughRequiredDwellMs", 0)) / 86400000.0
+	var material_item := str(capability.get("breakthroughMaterialItemId", "spirit_stone"))
+	var material_qty := int(capability.get("breakthroughMaterialQuantity", 0))
+	var material_owned := int(capability.get("breakthroughMaterialOwned", 0))
+	var duration_seconds := float(capability.get("durationMs", 10000)) / 1000.0
+	var text := "Breakthrough: %s | XP %d/%d | %s | time %.1f/%.0f days | cost %s x%d (owned %d) | %.1fs | %s" % [
 		realm,
 		cultivation_xp,
 		threshold,
 		gate,
+		elapsed_days,
+		required_days,
+		material_item,
+		material_qty,
+		material_owned,
+		duration_seconds,
 		state
 	]
 	var risk_text := risk_preview_text(capability, true)
 	return text + ("\n" + risk_text if risk_text != "" else "")
+
+func cultivation_detail_text(capability: Dictionary) -> String:
+	if capability.is_empty() or str(capability.get("type", "")) != "cultivate":
+		return ""
+	var option := selected_action_option(capability)
+	var source: Dictionary = option if not option.is_empty() else capability
+	var mode := str(source.get("cultivationMode", source.get("params", {}).get("cultivationMode", "ambient")))
+	var mode_label := "Ambient Qi"
+	if mode == "spirit_stone":
+		mode_label = "Spirit Stone"
+	elif mode == "qi_pill":
+		mode_label = "Qi Pill"
+	var energy := int(source.get("spiritualEnergy", capability.get("spiritualEnergy", 0)))
+	var duration_ms := int(source.get("durationMs", capability.get("durationMs", 8000)))
+	var estimated = source.get("estimatedXp", {})
+	if typeof(estimated) != TYPE_DICTIONARY:
+		estimated = {}
+	var min_xp := int(estimated.get("min", 0))
+	var max_xp := int(estimated.get("max", min_xp))
+	var item_cost = source.get("itemCost", null)
+	var cost_text := "free"
+	if typeof(item_cost) == TYPE_DICTIONARY:
+		cost_text = "%s x%d" % [str(item_cost.get("itemId", "resource")), int(item_cost.get("qty", 1))]
+	var pendant_bonus := float(capability.get("pendantBonus", 0.0))
+	var pendant_text := " | pendant +%d%% included" % int(round(pendant_bonus * 100.0)) if pendant_bonus > 0.0 else ""
+	var state := "ready" if capability.get("enabled", false) == true else str(capability.get("reason", "blocked"))
+	return "Cultivation: %s | %.1fs | spiritual energy %d/10 | XP %d-%d | cost %s%s | %s" % [
+		mode_label,
+		float(duration_ms) / 1000.0,
+		energy,
+		min_xp,
+		max_xp,
+		cost_text,
+		pendant_text,
+		state,
+	]
+
+func cultivation_confirmation_text(capability: Dictionary) -> String:
+	var detail := cultivation_detail_text(capability)
+	if detail == "":
+		return "Cultivation details are unavailable."
+	return detail + "\nThe resource is reserved now and only consumed by Convex after the full body duration completes."
+
+func use_item_detail_text(capability: Dictionary) -> String:
+	if capability.is_empty() or str(capability.get("type", "")) != "use_item":
+		return ""
+	var option := selected_action_option(capability)
+	var source: Dictionary = option if not option.is_empty() else capability
+	var item_name := str(source.get("itemName", source.get("itemId", "healing item")))
+	var item_id := str(source.get("itemId", capability.get("params", {}).get("itemId", "")))
+	var qty := int(source.get("qtyAvailable", capability.get("qtyAvailable", 0)))
+	var current_health := int(source.get("currentHealth", capability.get("currentHealth", 0)))
+	var max_health := int(source.get("maxHealth", capability.get("maxHealth", current_health)))
+	var heal_value := int(source.get("healValue", capability.get("healValue", 0)))
+	var effective_heal := int(source.get("effectiveHeal", capability.get("effectiveHeal", heal_value)))
+	var resulting_health := mini(max_health, current_health + maxi(0, effective_heal))
+	var state := "ready" if capability.get("enabled", false) == true else str(capability.get("reason", "blocked"))
+	var text := "Use item: %s (%s) x1 | inventory %d -> %d | health %d -> %d/%d (+%d, up to %d) | %s" % [
+		item_name,
+		item_id,
+		qty,
+		maxi(0, qty - 1),
+		current_health,
+		resulting_health,
+		max_health,
+		maxi(0, effective_heal),
+		maxi(0, heal_value),
+		state
+	]
+	var confirmation_preview := confirmation_preview_text(source, true)
+	if confirmation_preview != "":
+		text = confirmation_preview + "\n" + text
+	var selection_text := option_selection_text(source)
+	if selection_text != "":
+		text += "\n" + selection_text
+	var delta_text := inventory_delta_preview_text(source)
+	return text + ("\n" + delta_text if delta_text != "" else "")
 
 func selected_action_option(capability: Dictionary) -> Dictionary:
 	var selected_option = capability.get("selectedOption", {})
@@ -275,6 +443,37 @@ func gift_confirmation_text(capability: Dictionary, target_name: String) -> Stri
 		text = confirmation_preview + "\n\n" + text
 	if selection_text != "":
 		text += "\n" + selection_text
+	return text + ("\n" + delta_text if delta_text != "" else "")
+
+func use_item_confirmation_text(capability: Dictionary) -> String:
+	var option := selected_action_option(capability)
+	var source: Dictionary = option if not option.is_empty() else capability
+	var item_name := str(source.get("itemName", source.get("itemId", "healing item")))
+	var item_id := str(source.get("itemId", capability.get("params", {}).get("itemId", "")))
+	var qty := int(source.get("qtyAvailable", capability.get("qtyAvailable", 0)))
+	var current_health := int(source.get("currentHealth", capability.get("currentHealth", 0)))
+	var max_health := int(source.get("maxHealth", capability.get("maxHealth", current_health)))
+	var heal_value := int(source.get("healValue", capability.get("healValue", 0)))
+	var effective_heal := int(source.get("effectiveHeal", capability.get("effectiveHeal", heal_value)))
+	var resulting_health := mini(max_health, current_health + maxi(0, effective_heal))
+	var text := "Use %s (%s) x1.\nInventory %d -> %d\nHealth %d -> %d/%d (+%d; restores up to %d).\nConvex will atomically consume one item and clamp health to the server-owned maximum." % [
+		item_name,
+		item_id,
+		qty,
+		maxi(0, qty - 1),
+		current_health,
+		resulting_health,
+		max_health,
+		maxi(0, effective_heal),
+		maxi(0, heal_value)
+	]
+	var confirmation_preview := confirmation_preview_text(source)
+	if confirmation_preview != "":
+		text = confirmation_preview + "\n\n" + text
+	var selection_text := option_selection_text(source)
+	if selection_text != "":
+		text += "\n" + selection_text
+	var delta_text := inventory_delta_preview_text(source)
 	return text + ("\n" + delta_text if delta_text != "" else "")
 
 func option_selection_text(option: Dictionary) -> String:
@@ -494,8 +693,8 @@ func breakthrough_confirmation_text(capability: Dictionary) -> String:
 		detail = "Attempt a breakthrough."
 	var risk_text := risk_preview_text(capability)
 	if risk_text != "":
-		return detail + "\n" + risk_text
-	return detail + "\nBreakthrough can succeed, fail, or backfire. Convex will adjudicate the durable outcome."
+		return detail + "\n" + risk_text + "\nSpirit stones are reserved at start and consumed by Convex only after the full body duration completes; interruption consumes nothing. A failed completed attempt starts a bounded recovery window."
+	return detail + "\nSpirit stones are reserved at start and consumed by Convex only after the full body duration completes; interruption consumes nothing."
 
 func realm_label(source: Dictionary, realm_key: String, stage_key: String) -> String:
 	var realm := str(source.get(realm_key, "?"))

@@ -24,3 +24,18 @@ jobs:
       - run: npm run godot:check-static
       - run: npm run godot:check-soak-policy
       - run: npm run godot:check-unit
+
+  life-and-dialogue:
+    name: Life baseline and dialogue checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run life:check-baseline -- --quick
+      - run: npm run dialogue:check-memory
+      - run: npm run dialogue:check-affinity

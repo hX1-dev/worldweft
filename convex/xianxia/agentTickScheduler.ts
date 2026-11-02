@@ -1,5 +1,20 @@
 import { v } from 'convex/values';
 import { internalMutation } from '../_generated/server';
+import { ensureIncapacitationRecovery } from './actions';
+import {
+  needsIncapacitationRecoveryEnrollment,
+} from './lifeStateLogic';
+export {
+  isAutonomousAgentEligible,
+  isGodotControlledActorId,
+  selectBoundedRoundRobinActorIds,
+  selectRoundRobinActorIds,
+  shouldRunAutonomousAgentTick,
+} from './agentTickSchedulerPolicy';
+import {
+  isAutonomousAgentEligible,
+  selectBoundedRoundRobinActorIds,
+} from './agentTickSchedulerPolicy';
 
 const ALL_MAPS_SCOPE = '*';
 const AGENT_TICK_SCAN_LIMIT = 128;
@@ -13,68 +28,8 @@ export type AgentTickReservation = {
   wrapped: boolean;
   scannedCount?: number;
   eligibleCountExact?: boolean;
+  recoveryEnrollments?: number;
 };
-
-export function isGodotControlledActorId(actorId: string) {
-  return actorId === 'godot_player' || actorId.startsWith('godot_smoke_');
-}
-
-export function selectBoundedRoundRobinActorIds(
-  afterActorIds: string[],
-  beginningActorIds: string[],
-  requestedLimit: number,
-) {
-  const ordered = [];
-  const seen = new Set<string>();
-  for (const actorId of [...afterActorIds, ...beginningActorIds]) {
-    if (seen.has(actorId) || isGodotControlledActorId(actorId)) continue;
-    seen.add(actorId);
-    ordered.push(actorId);
-  }
-  const limit = Math.min(ordered.length, Math.max(1, Math.floor(requestedLimit)));
-  return ordered.slice(0, limit);
-}
-
-export function selectRoundRobinActorIds(
-  actorIds: string[],
-  afterActorId: string | undefined,
-  requestedLimit: number,
-): Omit<AgentTickReservation, 'scope'> {
-  const eligible = [...new Set(actorIds)].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
-  if (eligible.length === 0) {
-    return {
-      actorIds: [],
-      eligibleCount: 0,
-      startAfterActorId: afterActorId,
-      nextAfterActorId: afterActorId,
-      wrapped: false,
-    };
-  }
-
-  const limit = Math.min(eligible.length, Math.max(1, Math.floor(requestedLimit)));
-  let startIndex = 0;
-  if (afterActorId) {
-    const exactIndex = eligible.indexOf(afterActorId);
-    if (exactIndex >= 0) {
-      startIndex = (exactIndex + 1) % eligible.length;
-    } else {
-      const nextIndex = eligible.findIndex((actorId) => actorId > afterActorId);
-      startIndex = nextIndex >= 0 ? nextIndex : 0;
-    }
-  }
-
-  const selected = Array.from(
-    { length: limit },
-    (_, offset) => eligible[(startIndex + offset) % eligible.length],
-  );
-  return {
-    actorIds: selected,
-    eligibleCount: eligible.length,
-    startAfterActorId: afterActorId,
-    nextAfterActorId: selected.at(-1),
-    wrapped: startIndex + limit > eligible.length,
-  };
-}
 
 export const reserveAgentTickActors = internalMutation({
   args: {
@@ -96,10 +51,7 @@ export const reserveAgentTickActors = internalMutation({
           .query('xianxiaProfiles')
           .withIndex('byMap', (q) =>
             afterActorId
-              ? q
-                  .eq('worldId', args.worldId)
-                  .eq('mapId', args.mapId)
-                  .gt('actorId', afterActorId)
+              ? q.eq('worldId', args.worldId).eq('mapId', args.mapId).gt('actorId', afterActorId)
               : q.eq('worldId', args.worldId).eq('mapId', args.mapId),
           )
           .order('asc')
@@ -116,9 +68,7 @@ export const reserveAgentTickActors = internalMutation({
     const beginningProfiles = args.mapId
       ? await ctx.db
           .query('xianxiaProfiles')
-          .withIndex('byMap', (q) =>
-            q.eq('worldId', args.worldId).eq('mapId', args.mapId),
-          )
+          .withIndex('byMap', (q) => q.eq('worldId', args.worldId).eq('mapId', args.mapId))
           .order('asc')
           .take(AGENT_TICK_SCAN_LIMIT)
       : await ctx.db
@@ -126,27 +76,52 @@ export const reserveAgentTickActors = internalMutation({
           .withIndex('actor', (q) => q.eq('worldId', args.worldId))
           .order('asc')
           .take(AGENT_TICK_SCAN_LIMIT);
+    const recoveryEnrollmentNow = Date.now();
+    const scannedProfiles = new Map(
+      [...afterProfiles, ...beginningProfiles].map((profile) => [String(profile._id), profile]),
+    );
+    let recoveryEnrollments = 0;
+    for (const profile of scannedProfiles.values()) {
+      if (!needsIncapacitationRecoveryEnrollment(profile)) continue;
+      if (await ensureIncapacitationRecovery(ctx, profile, recoveryEnrollmentNow)) {
+        recoveryEnrollments++;
+      }
+    }
+    const requestedLimit = Math.min(8, Math.max(1, Math.floor(args.limit ?? 4)));
+    const afterEligible = afterProfiles.filter(isAutonomousAgentEligible);
+    const beginningEligible = beginningProfiles.filter(isAutonomousAgentEligible);
+    // 尚未扫到索引尾端时不提前回卷；若当前 128 条里大多失能，则推进扫描游标，
+    // 避免前一窗口的失能者让后面的健康角色永久饥饿。
+    const reachedEnd = afterProfiles.length < AGENT_TICK_SCAN_LIMIT;
     const actorIds = selectBoundedRoundRobinActorIds(
-      afterProfiles.map((profile) => profile.actorId),
-      beginningProfiles.map((profile) => profile.actorId),
-      Math.min(8, Math.max(1, Math.floor(args.limit ?? 4))),
+      afterEligible.map((profile) => profile.actorId),
+      reachedEnd ? beginningEligible.map((profile) => profile.actorId) : [],
+      requestedLimit,
     );
-    const beginningEligible = beginningProfiles.filter(
-      (profile) => !isGodotControlledActorId(profile.actorId),
+    const selectedFromAfter = actorIds.filter((actorId) =>
+      afterEligible.some((profile) => profile.actorId === actorId),
     );
+    const mustAdvancePastIneligibleWindow =
+      !reachedEnd && selectedFromAfter.length < requestedLimit;
+    const nextAfterActorId = mustAdvancePastIneligibleWindow
+      ? (afterProfiles.at(-1)?.actorId ?? afterActorId)
+      : (actorIds.at(-1) ??
+        afterProfiles.at(-1)?.actorId ??
+        beginningProfiles.at(-1)?.actorId ??
+        afterActorId);
     const selected: Omit<AgentTickReservation, 'scope'> = {
       actorIds,
       eligibleCount: beginningEligible.length,
       startAfterActorId: afterActorId,
-      nextAfterActorId: actorIds.at(-1) ?? afterActorId,
+      nextAfterActorId,
       wrapped:
-        Boolean(afterActorId) &&
-        actorIds.some((actorId) => actorId <= (afterActorId ?? actorId)),
+        Boolean(afterActorId) && actorIds.some((actorId) => actorId <= (afterActorId ?? actorId)),
       scannedCount: afterProfiles.length + beginningProfiles.length,
       eligibleCountExact: beginningProfiles.length < AGENT_TICK_SCAN_LIMIT,
+      recoveryEnrollments,
     };
 
-    if (selected.actorIds.length > 0 && selected.nextAfterActorId) {
+    if (selected.nextAfterActorId && selected.nextAfterActorId !== afterActorId) {
       const cursor = {
         scope,
         afterActorId: selected.nextAfterActorId,

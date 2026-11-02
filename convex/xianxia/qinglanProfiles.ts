@@ -91,6 +91,7 @@ export function qinglanResidentProfileSeed(resident: QinglanResidentProfileSourc
     cultivationXp: stats.cultivationXp,
     mood: 1,
     health: stats.health,
+    maxHealth: stats.health,
     spirit: stats.spirit,
     reputation: stats.reputation,
     inventory: starterInventoryForResident(resident.role),
@@ -124,7 +125,10 @@ export function qinglanResidentProfilePatch(
       belowFloor || atFloor
         ? Math.max(profile.cultivationXp ?? 0, stats.cultivationXp)
         : profile.cultivationXp,
-    health: Math.max(profile.health ?? 0, stats.health),
+    health: profile.health,
+    // Old Qinglan profiles can have durable health from before maxHealth was
+    // introduced. Preserve that health as a valid upper bound when backfilling.
+    maxHealth: Math.max(profile.maxHealth ?? stats.health, profile.health),
     spirit: Math.max(profile.spirit ?? 0, stats.spirit),
     reputation: Math.max(profile.reputation ?? 0, stats.reputation),
     inventory: profile.inventory ?? starterInventoryForResident(resident.role),
@@ -133,6 +137,19 @@ export function qinglanResidentProfilePatch(
     currentIntent: resident.currentIntent,
     persona: profile.persona ?? `青岚坊市居民：${resident.name}，身份为${resident.role}。`,
   };
+}
+
+export function qinglanResidentProfileSyncPatch(
+  profile: Doc<'xianxiaProfiles'>,
+  resident: QinglanResidentProfileSource,
+) {
+  if (profile.lifeStatus === 'deceased') {
+    return {
+      name: resident.name,
+      role: resident.role,
+    };
+  }
+  return qinglanResidentProfilePatch(profile, resident);
 }
 
 export function godotPlayerProfileSeed(mapId: string, locationId: string) {
@@ -148,9 +165,16 @@ export function godotPlayerProfileSeed(mapId: string, locationId: string) {
     cultivationXp: 0,
     mood: 1,
     health: 8,
+    maxHealth: 8,
     spirit: 7,
     reputation: 0,
-    inventory: [{ itemId: 'spirit_stone', qty: 24 }],
+    // One finite healing item makes the real Godot self-use capability
+    // reachable in a newly seeded graybox world. Re-seeding never replenishes
+    // an existing profile because ensureGodotPlayerProfile is insert-only.
+    inventory: [
+      { itemId: 'spirit_stone', qty: 24 },
+      { itemId: 'healing_pill', qty: 1 },
+    ],
     mapId,
     currentLocationId: locationId,
     currentIntent: '通过 Godot 客户端在场景中行动。',

@@ -95,3 +95,70 @@ export function resolveTravelTarget(
 export function hasArrived(pos: Point, destination: Point, threshold = 1.5): boolean {
   return distance(pos, destination) <= threshold;
 }
+
+// The physical executor may legally snap an occupied semantic entry point to
+// a nearby walkable cell. During movement its live destination is authoritative;
+// after pathfinding stops, the last persisted executor destination remains the
+// exact endpoint. The broad semantic zone is never itself an arrival shortcut.
+export function effectiveTravelTarget(input: {
+  executorTarget?: Point;
+  persistedTarget?: Point;
+  semanticEntry?: Point;
+}): Point | undefined {
+  return (
+    input.executorTarget ??
+    input.persistedTarget ??
+    input.semanticEntry
+  );
+}
+
+export function pickAvailableTravelStandpoint(input: {
+  location: LocationPoint;
+  actorPosition: Point;
+  otherPositions: Point[];
+  map: TileMap;
+  collisionThreshold?: number;
+}): Point | null {
+  const threshold = input.collisionThreshold ?? 0.75;
+  const primary =
+    input.location.entryPoints[0] ??
+    input.actorPosition;
+  const candidates = [...input.location.entryPoints];
+  if (input.location.bounds) {
+    const { x1, y1, x2, y2 } =
+      input.location.bounds;
+    const boundsCells: Point[] = [];
+    for (let y = Math.ceil(y1); y <= Math.floor(y2); y++) {
+      for (let x = Math.ceil(x1); x <= Math.floor(x2); x++) {
+        boundsCells.push({ x, y });
+      }
+    }
+    boundsCells.sort(
+      (left, right) =>
+        distance(left, input.actorPosition) -
+          distance(right, input.actorPosition) ||
+        distance(left, primary) -
+          distance(right, primary) ||
+        left.y - right.y ||
+        left.x - right.x,
+    );
+    candidates.push(...boundsCells);
+  }
+  const seen = new Set<string>();
+  for (const candidate of candidates) {
+    const key = `${candidate.x}:${candidate.y}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    if (!isWalkable(candidate, input.map)) continue;
+    if (
+      input.otherPositions.some(
+        (position) =>
+          distance(position, candidate) < threshold,
+      )
+    ) {
+      continue;
+    }
+    return candidate;
+  }
+  return null;
+}

@@ -46,3 +46,7 @@ convex_local*
 
 # Convex local/anonymous backend state (holds deployment env incl. API keys)
 .convex/
+
+# Local run logs (soak, A/B, dialogue)
+/.logs/
+/godot-taixu-client/test-artifacts/

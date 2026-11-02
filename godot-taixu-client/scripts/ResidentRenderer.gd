@@ -410,6 +410,8 @@ func _status_color(status: String) -> Color:
 			return Color(0.56, 0.6, 1.0)
 		"speaking", "talking":
 			return Color(0.86, 0.46, 1.0)
+		"incapacitated":
+			return Color(0.72, 0.35, 0.38)
 		_:
 			return Color(0.72, 0.42, 1.0)
 

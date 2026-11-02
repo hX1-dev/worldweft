@@ -17,11 +17,15 @@ import {
 import {
   GODOT_BRIDGE_CONTRACT_VERSION,
   GODOT_BRIDGE_HARDENING_VERSIONS,
+  GODOT_ACTION_EXECUTION_PROTOCOL_VERSION,
+  GODOT_MOVEMENT_PROTOCOL_VERSION,
   contractError,
   parseGodotBridgeFailure,
   readGodotJson,
   validateGodotActionBody,
   validateGodotCapabilitiesBody,
+  validateGodotActionExecutionReportBody,
+  validateGodotMovementReportBody,
   validateGodotTickBody,
   type GodotActionType,
 } from './godotBridgeContract';
@@ -249,6 +253,10 @@ async function runPreparedGodotAction(
     metadata,
   });
   const result = await ctx.runAction(internal.xianxia.gm.actInternal, prepared.envelope);
+  const executionGoal =
+    result && typeof result === 'object' && 'executionGoal' in result
+      ? result.executionGoal
+      : undefined;
   const presentation = godotEventPresentation({
     actionType: prepared.envelope.type,
     eventType: result.eventType,
@@ -273,6 +281,16 @@ async function runPreparedGodotAction(
     resultCode: result.resultCode,
     clientActionId: result.clientActionId,
     idempotentReplay: result.idempotentReplay === true,
+    settled: executionGoal ? false : true,
+    executionStatus:
+      executionGoal && typeof executionGoal === 'object' && 'status' in executionGoal
+        ? executionGoal.status
+        : undefined,
+    executionId:
+      executionGoal && typeof executionGoal === 'object' && 'executionId' in executionGoal
+        ? executionGoal.executionId
+        : undefined,
+    executionGoal,
     eventType: result.eventType,
     traceChain: godotTraceChain({
       source: 'action',
@@ -482,6 +500,8 @@ const godotHealth = httpAction(async (_ctx, request) => {
       ok: true,
       service: 'xianxia-godot-convex-bridge',
       hardeningVersions: GODOT_BRIDGE_HARDENING_VERSIONS,
+      movementProtocolVersion: GODOT_MOVEMENT_PROTOCOL_VERSION,
+      actionExecutionProtocolVersion: GODOT_ACTION_EXECUTION_PROTOCOL_VERSION,
       security: godotBridgeSecuritySummary(config),
       routes: {
         worldState: '/godot/worldState?mapId=qinglan',
@@ -493,6 +513,11 @@ const godotHealth = httpAction(async (_ctx, request) => {
         replay: 'GET /godot/replay?mapId=qinglan',
         capabilities: 'POST /godot/capabilities',
         tick: 'POST /godot/tick (debug credential only)',
+        movementGoals:
+          'GET /godot/movementGoals?mapId=qinglan_valley_gate',
+      movementReport: 'POST /godot/movementReport (simulation credential only)',
+        actionExecutionGoals: 'GET /godot/actionExecutionGoals?mapId=qinglan',
+        actionExecutionReport: 'POST /godot/actionExecutionReport',
         arrive: 'POST /godot/arrive',
         interact: 'POST /godot/interact',
       },
@@ -779,6 +804,12 @@ const godotTick = httpAction(async (ctx, request) => {
     const mapId = body.mapId ?? 'qinglan';
     const tickStartedAt = Date.now();
     const limit = body.limit ?? 2;
+    if (mapId === 'qinglan_valley_gate') {
+      await ctx.runMutation(internal.xianxia.valleyMovement.ensureValleyAutonomySeeded, {
+        worldId,
+        now: tickStartedAt,
+      });
+    }
     const result = await ctx.runAction(internal.xianxia.agent.runAgentTickInternal, {
       worldId,
       limit,
@@ -815,6 +846,173 @@ const godotTick = httpAction(async (ctx, request) => {
   }
 });
 
+const godotMovementGoals = httpAction(async (ctx, request) => {
+  const auth = authorizeBridgeRequest(request, 'world:read');
+  if (auth.ok === false) return auth.response;
+  try {
+    const url = new URL(request.url);
+    assertQueryKeys(url, ['worldId', 'mapId']);
+    const binding = bindBridgeRequest(request, auth.principal, { worldId: readWorldId(url) });
+    if (binding.ok === false) return binding.response;
+    const mapId = readMapId(url) ?? 'qinglan_valley_gate';
+    const result = await ctx.runMutation(
+      internal.xianxia.valleyMovement.prepareMovementGoals,
+      {
+        worldId: binding.worldId as Id<'worlds'>,
+        mapId,
+        now: Date.now(),
+      },
+    );
+    return jsonResponse(request, {
+      ...result,
+      movementProtocolVersion: GODOT_MOVEMENT_PROTOCOL_VERSION,
+    });
+  } catch (error) {
+    return bridgeErrorResponse(request, error);
+  }
+});
+
+const godotMovementReport = httpAction(async (ctx, request) => {
+  const auth = authorizeBridgeRequest(request, 'simulation:write');
+  if (auth.ok === false) return auth.response;
+  try {
+    assertNoQueryParameters(request);
+    const rawBody = await readGodotJson(request);
+    const binding = bindBridgeRequest(request, auth.principal, {
+      worldId: readOptionalString(rawBody.worldId),
+    });
+    if (binding.ok === false) return binding.response;
+    const body = validateGodotMovementReportBody(rawBody);
+    const result = await ctx.runMutation(internal.xianxia.valleyMovement.reportMovement, {
+      worldId: binding.worldId as Id<'worlds'>,
+      commandId: body.commandId as Id<'movementCommands'>,
+      revision: body.revision,
+      actorId: body.actorId,
+      status: body.status,
+      positionTiles: body.positionTiles,
+      reasonCode: body.reasonCode,
+      reportedAt: body.reportedAt,
+      now: Date.now(),
+    });
+    if ('code' in result) {
+      const status = movementFailureStatus(result.code);
+      return errorResponse(request, status, result.code, result.reason, {
+        commandId: body.commandId,
+        revision: body.revision,
+      });
+    }
+    return jsonResponse(request, {
+      ...result,
+      movementProtocolVersion: GODOT_MOVEMENT_PROTOCOL_VERSION,
+    });
+  } catch (error) {
+    return bridgeErrorResponse(request, error);
+  }
+});
+
+const godotActionExecutionGoals = httpAction(async (ctx, request) => {
+  const auth = authorizeBridgeRequest(request, 'world:read');
+  if (auth.ok === false) return auth.response;
+  try {
+    const url = new URL(request.url);
+    assertQueryKeys(url, ['worldId', 'mapId']);
+    const binding = bindBridgeRequest(request, auth.principal, { worldId: readWorldId(url) });
+    if (binding.ok === false) return binding.response;
+    const mapId = readMapId(url) ?? 'qinglan';
+    const result = await ctx.runMutation(
+      internal.xianxia.actions.prepareActionExecutionGoals,
+      {
+        worldId: binding.worldId as Id<'worlds'>,
+        mapId,
+        actorId:
+          auth.principal.credentialKind === 'player'
+            ? auth.principal.primaryActorId
+            : undefined,
+        now: Date.now(),
+      },
+    );
+    return jsonResponse(request, result);
+  } catch (error) {
+    return bridgeErrorResponse(request, error);
+  }
+});
+
+const godotActionExecutionReport = httpAction(async (ctx, request) => {
+  // 玩家凭证只能执行自己的身体；debug 凭证因拥有 simulation:write
+  // 可在灰盒中执行 NPC。租约 owner 使用服务端命名空间，不信任客户端身份。
+  const auth = authorizeBridgeRequest(request, 'action:write');
+  if (auth.ok === false) return auth.response;
+  try {
+    assertNoQueryParameters(request);
+    const rawBody = await readGodotJson(request);
+    const binding = bindBridgeRequest(request, auth.principal, {
+      worldId: readOptionalString(rawBody.worldId),
+    });
+    if (binding.ok === false) return binding.response;
+    const body = validateGodotActionExecutionReportBody(rawBody);
+    if (
+      auth.principal.credentialKind === 'player' &&
+      body.actorId !== auth.principal.primaryActorId
+    ) {
+      return errorResponse(
+        request,
+        403,
+        'execution_actor_forbidden',
+        'Player credentials may only report execution for their bound actor.',
+      );
+    }
+    const result = await ctx.runMutation(internal.xianxia.actions.reportActionExecution, {
+      worldId: binding.worldId as Id<'worlds'>,
+      executionId: body.executionId as Id<'actionExecutions'>,
+      revision: body.revision,
+      actorId: body.actorId,
+      executorId: `${auth.principal.credentialKind}:${body.executorId}`,
+      status: body.status,
+      mapId: body.mapId,
+      positionTiles: body.positionTiles,
+      reasonCode: body.reasonCode,
+      reportedAt: body.reportedAt,
+    });
+    if ('code' in result) {
+      return errorResponse(
+        request,
+        actionExecutionFailureStatus(result.code),
+        result.code,
+        result.reason,
+        { executionId: body.executionId, revision: body.revision },
+      );
+    }
+    return jsonResponse(request, {
+      ...result,
+      actionExecutionProtocolVersion: GODOT_ACTION_EXECUTION_PROTOCOL_VERSION,
+    });
+  } catch (error) {
+    return bridgeErrorResponse(request, error);
+  }
+});
+
+function actionExecutionFailureStatus(code: string) {
+  if (code === 'execution_not_found') return 404;
+  if (
+    ['execution_world_mismatch', 'execution_actor_mismatch', 'lease_owner_mismatch'].includes(code)
+  ) {
+    return 403;
+  }
+  if (code === 'execution_not_ready') return 422;
+  return 409;
+}
+
+function movementFailureStatus(code: string) {
+  if (code === 'command_not_found') return 404;
+  if (code === 'actor_mismatch') return 403;
+  if (
+    ['invalid_position', 'invalid_segment', 'speed_exceeded', 'not_at_destination'].includes(code)
+  ) {
+    return 422;
+  }
+  return 409;
+}
+
 http.route({
   path: '/replicate_webhook',
   method: 'POST',
@@ -834,6 +1032,10 @@ for (const path of [
   '/godot/action',
   '/godot/capabilities',
   '/godot/tick',
+  '/godot/movementGoals',
+  '/godot/movementReport',
+  '/godot/actionExecutionGoals',
+  '/godot/actionExecutionReport',
   '/godot/arrive',
   '/godot/interact',
 ]) {
@@ -856,6 +1058,18 @@ http.route({ path: '/godot/replay', method: 'GET', handler: godotReplay });
 http.route({ path: '/godot/action', method: 'POST', handler: godotAction });
 http.route({ path: '/godot/capabilities', method: 'POST', handler: godotCapabilities });
 http.route({ path: '/godot/tick', method: 'POST', handler: godotTick });
+http.route({ path: '/godot/movementGoals', method: 'GET', handler: godotMovementGoals });
+http.route({ path: '/godot/movementReport', method: 'POST', handler: godotMovementReport });
+http.route({
+  path: '/godot/actionExecutionGoals',
+  method: 'GET',
+  handler: godotActionExecutionGoals,
+});
+http.route({
+  path: '/godot/actionExecutionReport',
+  method: 'POST',
+  handler: godotActionExecutionReport,
+});
 http.route({ path: '/godot/arrive', method: 'POST', handler: godotArrive });
 http.route({ path: '/godot/interact', method: 'POST', handler: godotInteract });
 export default http;

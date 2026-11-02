@@ -1,8 +1,10 @@
 import {
+  isAutonomousAgentEligible,
   isGodotControlledActorId,
   selectBoundedRoundRobinActorIds,
   selectRoundRobinActorIds,
-} from './agentTickScheduler';
+  shouldRunAutonomousAgentTick,
+} from './agentTickSchedulerPolicy';
 
 describe('agent tick round-robin scheduler', () => {
   test('covers every eligible actor across bounded batches before repeating', () => {
@@ -40,9 +42,30 @@ describe('agent tick round-robin scheduler', () => {
     expect(isGodotControlledActorId('qinglan:resident')).toBe(false);
   });
 
+  test('only healthy non-Godot profiles are eligible for autonomous ticks', () => {
+    expect(isAutonomousAgentEligible({ actorId: 'han_li', health: 8 })).toBe(true);
+    expect(isAutonomousAgentEligible({ actorId: 'han_li', health: 0 })).toBe(false);
+    expect(
+      isAutonomousAgentEligible({
+        actorId: 'han_li',
+        health: 8,
+        lifeStatus: 'deceased',
+      }),
+    ).toBe(false);
+    expect(isAutonomousAgentEligible({ actorId: 'godot_smoke_fixture', health: 8 })).toBe(false);
+  });
+
+  test('requires both the world switch and explicit deployment opt-in before autonomous cron runs', () => {
+    expect(shouldRunAutonomousAgentTick(true, undefined)).toBe(false);
+    expect(shouldRunAutonomousAgentTick(true, '0')).toBe(false);
+    expect(shouldRunAutonomousAgentTick(false, '1')).toBe(false);
+    expect(shouldRunAutonomousAgentTick(true, '1')).toBe(true);
+  });
+
   test('selects from bounded after/wrap windows without scanning all actors', () => {
-    const actors = Array.from({ length: 120 }, (_, index) =>
-      `npc_${String(index).padStart(3, '0')}`,
+    const actors = Array.from(
+      { length: 120 },
+      (_, index) => `npc_${String(index).padStart(3, '0')}`,
     );
     expect(
       selectBoundedRoundRobinActorIds(

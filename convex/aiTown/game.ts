@@ -25,6 +25,7 @@ import { internal } from '../_generated/api';
 import { HistoricalObject } from '../engine/historicalObject';
 import { AgentDescription, serializedAgentDescription } from './agentDescription';
 import { parseMap, serializeMap } from '../util/object';
+import { stableObservationDigest } from '../xianxia/lifeObservation';
 
 const gameState = v.object({
   world: v.object(serializedWorld),
@@ -34,7 +35,7 @@ const gameState = v.object({
 });
 type GameState = Infer<typeof gameState>;
 
-const gameStateDiff = v.object({
+export const gameStateDiff = v.object({
   world: v.object(serializedWorld),
   playerDescriptions: v.optional(v.array(v.object(serializedPlayerDescription))),
   agentDescriptions: v.optional(v.array(v.object(serializedAgentDescription))),

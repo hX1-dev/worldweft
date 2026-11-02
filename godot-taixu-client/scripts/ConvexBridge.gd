@@ -12,6 +12,10 @@ signal capabilities_received(payload: Dictionary)
 signal actor_context_received(payload: Dictionary)
 signal replay_trace_received(payload: Dictionary)
 signal tick_completed(payload: Dictionary)
+signal movement_goals_received(payload: Dictionary)
+signal movement_report_completed(payload: Dictionary)
+signal action_execution_goals_received(payload: Dictionary)
+signal action_execution_report_completed(payload: Dictionary)
 signal request_failed(label: String, status_code: int, message: String)
 
 @export var base_url := "http://127.0.0.1:3211"
@@ -27,6 +31,9 @@ var _player_bearer_token := ""
 var _debug_bearer_token := ""
 
 func _ready() -> void:
+	var configured_base_url := OS.get_environment("GODOT_BRIDGE_BASE_URL").strip_edges()
+	if configured_base_url != "":
+		base_url = configured_base_url.trim_suffix("/")
 	_player_bearer_token = OS.get_environment(player_token_environment).strip_edges()
 	_debug_bearer_token = OS.get_environment(debug_token_environment).strip_edges()
 	_http = HTTPRequest.new()
@@ -121,6 +128,35 @@ func post_tick(world_id: String, limit: int = 2) -> void:
 	}
 	_request("tick", "/godot/tick", HTTPClient.METHOD_POST, payload)
 
+func get_movement_goals() -> void:
+	var path := "/godot/movementGoals?mapId=" + map_id.uri_encode()
+	_request("movementGoals", path, HTTPClient.METHOD_GET)
+
+func post_movement_report(payload: Dictionary) -> void:
+	_request("movementReport", "/godot/movementReport", HTTPClient.METHOD_POST, payload)
+
+func get_action_execution_goals(world_id: String = "") -> void:
+	var path := "/godot/actionExecutionGoals?mapId=" + map_id.uri_encode()
+	if world_id != "":
+		path += "&worldId=" + world_id.uri_encode()
+	_request("actionExecutionGoals", path, HTTPClient.METHOD_GET)
+
+func post_action_execution_report(payload: Dictionary) -> void:
+	_request("actionExecutionReport", "/godot/actionExecutionReport", HTTPClient.METHOD_POST, payload)
+
+func discard_queued_movement_reports(command_id: String, revision: int) -> void:
+	if command_id == "":
+		return
+	for index in range(_request_queue.size() - 1, -1, -1):
+		var queued = _request_queue[index]
+		if typeof(queued) != TYPE_DICTIONARY or str(queued.get("label", "")) != "movementReport":
+			continue
+		var queued_payload = queued.get("payload", {})
+		if typeof(queued_payload) != TYPE_DICTIONARY:
+			continue
+		if str(queued_payload.get("commandId", "")) == command_id and int(queued_payload.get("revision", -1)) == revision:
+			_request_queue.remove_at(index)
+
 func is_busy() -> bool:
 	return _active_label != "" or (_http != null and _http.get_http_client_status() != HTTPClient.STATUS_DISCONNECTED)
 
@@ -161,11 +197,31 @@ func _request(label: String, path: String, method: int, payload: Dictionary = {}
 	})
 
 func _enqueue_request(request: Dictionary) -> void:
-	if ["capabilities", "actorContext", "replay"].has(str(request.get("label", ""))):
+	if ["capabilities", "actorContext", "replay", "movementGoals", "actionExecutionGoals"].has(str(request.get("label", ""))):
 		for index in range(_request_queue.size() - 1, -1, -1):
 			var queued = _request_queue[index]
 			if typeof(queued) == TYPE_DICTIONARY and str(queued.get("label", "")) == str(request.get("label", "")):
 				_request_queue.remove_at(index)
+	if str(request.get("label", "")) == "movementReport":
+		var payload = request.get("payload", {})
+		if typeof(payload) == TYPE_DICTIONARY and str(payload.get("status", "")) == "moving":
+			for index in range(_request_queue.size() - 1, -1, -1):
+				var queued = _request_queue[index]
+				if typeof(queued) != TYPE_DICTIONARY or str(queued.get("label", "")) != "movementReport":
+					continue
+				var queued_payload = queued.get("payload", {})
+				if typeof(queued_payload) == TYPE_DICTIONARY and str(queued_payload.get("status", "")) == "moving" and str(queued_payload.get("commandId", "")) == str(payload.get("commandId", "")) and int(queued_payload.get("revision", -1)) == int(payload.get("revision", -1)):
+					_request_queue.remove_at(index)
+	if str(request.get("label", "")) == "actionExecutionReport":
+		var execution_payload = request.get("payload", {})
+		if typeof(execution_payload) == TYPE_DICTIONARY and str(execution_payload.get("status", "")) == "acting":
+			for index in range(_request_queue.size() - 1, -1, -1):
+				var queued = _request_queue[index]
+				if typeof(queued) != TYPE_DICTIONARY or str(queued.get("label", "")) != "actionExecutionReport":
+					continue
+				var queued_payload = queued.get("payload", {})
+				if typeof(queued_payload) == TYPE_DICTIONARY and str(queued_payload.get("status", "")) == "acting" and str(queued_payload.get("executionId", "")) == str(execution_payload.get("executionId", "")) and int(queued_payload.get("revision", -1)) == int(execution_payload.get("revision", -1)):
+					_request_queue.remove_at(index)
 	_request_queue.append(request)
 
 func _start_next_request() -> void:
@@ -192,7 +248,11 @@ func _start_request(request: Dictionary) -> void:
 	var payload = request.get("payload", {})
 	if typeof(payload) != TYPE_DICTIONARY:
 		payload = {}
-	var bearer_token := _debug_bearer_token if label == "tick" else _player_bearer_token
+	var bearer_token := _debug_bearer_token if ["tick", "movementReport"].has(label) else _player_bearer_token
+	if ["actionExecutionGoals", "actionExecutionReport"].has(label) and _debug_bearer_token != "":
+		bearer_token = _debug_bearer_token
+	if ["movementGoals", "actionExecutionGoals"].has(label) and bearer_token == "":
+		bearer_token = _debug_bearer_token
 	if bearer_token == "":
 		request_failed.emit(label, 0, _missing_credential_message(label))
 		call_deferred("_start_next_request")
@@ -279,13 +339,21 @@ func _on_request_completed(
 			replay_trace_received.emit(payload)
 		"tick":
 			tick_completed.emit(payload)
+		"movementGoals":
+			movement_goals_received.emit(payload)
+		"movementReport":
+			movement_report_completed.emit(payload)
+		"actionExecutionGoals":
+			action_execution_goals_received.emit(payload)
+		"actionExecutionReport":
+			action_execution_report_completed.emit(payload)
 		_:
 			request_failed.emit(label, response_code, "Unknown request label.")
 	call_deferred("_start_next_request")
 
 func _missing_credential_message(label: String) -> String:
-	if label == "tick":
-		return "Debug tick is unavailable. Set GODOT_BRIDGE_DEBUG_TOKEN in the process environment."
+	if ["tick", "movementReport"].has(label):
+		return "Simulation write is unavailable. Set GODOT_BRIDGE_DEBUG_TOKEN in the process environment."
 	return "Godot bridge credential is missing. Set GODOT_BRIDGE_TOKEN in the process environment."
 
 func _queue_action_retry(request: Dictionary, result: int, response_code: int) -> bool:
@@ -298,7 +366,7 @@ func _queue_action_retry(request: Dictionary, result: int, response_code: int) -
 	return true
 
 func _should_retry_action_request(request: Dictionary, result: int, response_code: int) -> bool:
-	if str(request.get("label", "")) != "action" or int(request.get("attempt", 0)) >= 1:
+	if not ["action", "movementReport", "actionExecutionReport"].has(str(request.get("label", ""))) or int(request.get("attempt", 0)) >= 1:
 		return false
 	if result != HTTPRequest.RESULT_SUCCESS:
 		return true
@@ -344,6 +412,18 @@ func _validate_success_payload(label: String, payload: Dictionary) -> String:
 		"capabilities":
 			if typeof(payload.get("actions", null)) != TYPE_ARRAY:
 				return "Capabilities response is missing actions."
+			var actor_state = payload.get("actorState", null)
+			if actor_state != null:
+				if typeof(actor_state) != TYPE_DICTIONARY:
+					return "Capabilities actorState must be an object or null."
+				if typeof(actor_state.get("health", null)) not in [TYPE_INT, TYPE_FLOAT] or typeof(actor_state.get("maxHealth", null)) not in [TYPE_INT, TYPE_FLOAT]:
+					return "Capabilities actorState is missing numeric health fields."
+					if not ["healthy", "injured", "incapacitated"].has(str(actor_state.get("lifeState", ""))):
+						return "Capabilities actorState has an invalid lifeState."
+					if actor_state.has("fatigue") and typeof(actor_state.get("fatigue")) not in [TYPE_INT, TYPE_FLOAT]:
+						return "Capabilities actorState has invalid fatigue."
+					if actor_state.has("fatigueBand") and not ["rested", "weary", "tired", "exhausted"].has(str(actor_state.get("fatigueBand", ""))):
+						return "Capabilities actorState has an invalid fatigueBand."
 		"actorContext":
 			if str(payload.get("actorId", "")) == "" or typeof(payload.get("recentActions", null)) != TYPE_ARRAY or typeof(payload.get("contextWindow", null)) != TYPE_DICTIONARY:
 				return "Actor context response is incomplete."
@@ -365,6 +445,48 @@ func _validate_success_payload(label: String, payload: Dictionary) -> String:
 				return "Tick response is missing scheduler metadata."
 			if typeof(payload.get("tickEvents", null)) != TYPE_ARRAY or typeof(payload.get("recentEvents", null)) != TYPE_ARRAY:
 				return "Tick response is incomplete."
+		"movementGoals":
+			if int(payload.get("movementProtocolVersion", 0)) != 1 or str(payload.get("mapId", "")) == "" or typeof(payload.get("goals", null)) != TYPE_ARRAY:
+				return "Movement goals response is missing protocol version, mapId, or goals."
+			for goal_value in payload.get("goals", []):
+				if typeof(goal_value) != TYPE_DICTIONARY:
+					return "Movement goals response contains a non-object goal."
+				var goal: Dictionary = goal_value
+				if str(goal.get("commandId", "")) == "" or str(goal.get("actionRecordId", "")) == "" or str(goal.get("actorId", "")) == "" or str(goal.get("mapId", "")) == "":
+					return "Movement goal is missing identity fields."
+				if not _is_json_integer(goal.get("revision", null)) or typeof(goal.get("requestedTarget", null)) != TYPE_DICTIONARY or typeof(goal.get("acceptedTile", null)) != TYPE_DICTIONARY:
+					return "Movement goal is missing revision or target fields."
+			var cancellations = payload.get("cancellations", [])
+			if typeof(cancellations) != TYPE_ARRAY:
+				return "Movement goals response cancellations must be an array."
+			for cancellation_value in cancellations:
+				if typeof(cancellation_value) != TYPE_DICTIONARY:
+					return "Movement goals response contains a non-object cancellation."
+				var cancellation: Dictionary = cancellation_value
+				if str(cancellation.get("commandId", "")) == "" or str(cancellation.get("actorId", "")) == "" or str(cancellation.get("mapId", "")) == "" or str(cancellation.get("reasonCode", "")) == "":
+					return "Movement cancellation is missing identity or reason fields."
+				if not _is_json_integer(cancellation.get("revision", null)) or not _is_json_integer(cancellation.get("cancelledAt", null)):
+					return "Movement cancellation is missing revision or cancelledAt."
+		"movementReport":
+			if int(payload.get("movementProtocolVersion", 0)) != 1 or str(payload.get("commandId", "")) == "" or not _is_json_integer(payload.get("revision", null)):
+				return "Movement report response is missing protocol version, commandId, or revision."
+			if not ["accepted", "moving", "arrived", "blocked", "cancelled"].has(str(payload.get("status", ""))):
+				return "Movement report response has an invalid status."
+		"actionExecutionGoals":
+			if int(payload.get("actionExecutionProtocolVersion", 0)) != 1 or typeof(payload.get("goals", null)) != TYPE_ARRAY or typeof(payload.get("terminals", null)) != TYPE_ARRAY:
+				return "Action execution goals response is incomplete."
+			for goal_value in payload.get("goals", []):
+				if typeof(goal_value) != TYPE_DICTIONARY:
+					return "Action execution goals response contains a non-object goal."
+				var goal: Dictionary = goal_value
+				if str(goal.get("executionId", "")) == "" or str(goal.get("actionRecordId", "")) == "" or str(goal.get("actorId", "")) == "" or not _is_json_integer(goal.get("revision", null)):
+					return "Action execution goal is missing lifecycle identity."
+		"actionExecutionReport":
+			if int(payload.get("actionExecutionProtocolVersion", 0)) != 1 or typeof(payload.get("execution", null)) != TYPE_DICTIONARY:
+				return "Action execution report response is incomplete."
+			var execution: Dictionary = payload.get("execution", {})
+			if str(execution.get("executionId", "")) == "" or not ["accepted", "acting", "completed", "interrupted", "blocked"].has(str(execution.get("status", ""))):
+				return "Action execution report response has invalid lifecycle state."
 	return ""
 
 func _pagination_error(payload: Dictionary, collection_keys: PackedStringArray) -> String:

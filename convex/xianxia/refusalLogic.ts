@@ -25,6 +25,33 @@ export type RefusalInput = {
 
 export type RefusalResult = { refused: boolean; reasonCode?: string; reason?: string };
 
+export type RefusalSemantic =
+  | 'expression_only'
+  | 'negotiation_terminal'
+  | 'group_vote'
+  | 'request_terminal'
+  | 'target_action_outcome';
+
+// C016e3d：拒绝不是一个万能动作。这里集中冻结五种相似表象的业务边界，
+// 让 UI/prompt 或未来动作扩展不能把一句台词误当成任意业务终态。
+export function refusalSemanticFor(input: {
+  actionType: string;
+  speechAct?: string;
+  operation?: string;
+  choice?: string;
+}): RefusalSemantic | null {
+  if (input.actionType === 'talk' && input.speechAct === 'refuse') return 'expression_only';
+  if (input.actionType === 'negotiate' && input.operation === 'reject') {
+    return 'negotiation_terminal';
+  }
+  if (input.actionType === 'group_decide' && input.choice === 'oppose') return 'group_vote';
+  if (input.actionType === 'decline_request') return 'request_terminal';
+  if (['gift', 'trade', 'request_teaching'].includes(input.actionType)) {
+    return 'target_action_outcome';
+  }
+  return null;
+}
+
 // 敏感物品购买门槛（§9.4）。
 const SENSITIVE = { minTrust: 20, maxSuspicion: 30, minReputation: -10 };
 // 交易硬拒阈值（§9.3）。

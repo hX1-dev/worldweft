@@ -1,4 +1,9 @@
-import type { AgentContext, AgentProposal } from './agentLogic';
+import {
+  ACTOR_INCAPACITATED_SKIP_REASON,
+  type AgentContext,
+  type AgentProposal,
+} from './agentLogic';
+import { isActorIncapacitated } from './lifeStateLogic';
 
 // 需求驱动日程 + 对话纪律的「纯逻辑层」（World Foundation · W4a，W4b 修补）。
 // 不依赖 Convex，可被 Jest 直接单测。
@@ -14,6 +19,7 @@ const HOME_ZONE: Record<string, string> = {
   steward: 'mountain_gate',
   guard: 'alchemy_room',
   merchant: 'market',
+  herbalist: 'herb_field',
   outer_disciple: 'mountain_gate',
   inner_disciple: 'mountain_gate',
   sword_disciple: 'mountain_gate',
@@ -49,19 +55,26 @@ export function findConversationNeed(ctx: AgentContext): ConversationNeed | null
 export type RoutineDecision =
   | { kind: 'act'; proposal: AgentProposal }
   | { kind: 'skip'; reason: string }
-  | { kind: 'defer' }; // 交给 LLM 在非社交动作里增加变化（仅自由弟子）
+  | { kind: 'defer' }; // 交给 LLM 在非社交动作里选择；通常是自由弟子，破境长老也可进入
 
 // 需求驱动的本分日程。返回 act（有明确该做的事）/ skip（守职不动）/ defer（弟子交 LLM 添变化）。
 export function planRoutineIntent(ctx: AgentContext): RoutineDecision {
   const self = ctx.self;
+  if (isActorIncapacitated(self.health)) {
+    return { kind: 'skip', reason: ACTOR_INCAPACITATED_SKIP_REASON };
+  }
   const here = self.currentLocationId;
-  const can = (a: string) => ctx.availableActions.includes(a as AgentContext['availableActions'][number]);
+  const can = (a: string) =>
+    ctx.availableActions.includes(a as AgentContext['availableActions'][number]);
 
   // 1) 途中（无语义地点）→ 回本分之地（Agent 只给语义地点，坐标由系统算）。
   if (!here) {
     const home = homeZone(self.role);
     if (home && (ctx.knownLocations ?? []).some((l) => l.locationId === home)) {
-      return { kind: 'act', proposal: { type: 'travel', targetId: home, intent: '回到本分之地', source: 'agent' } };
+      return {
+        kind: 'act',
+        proposal: { type: 'travel', targetId: home, intent: '回到本分之地', source: 'agent' },
+      };
     }
     return { kind: 'skip', reason: 'no_destination' };
   }
@@ -69,7 +82,16 @@ export function planRoutineIntent(ctx: AgentContext): RoutineDecision {
   // 2) 已在某地，但不在本分之地 → 归位。明确委托 / 战略 travel 已在上层先处理。
   const home = homeZone(self.role);
   if (home && here !== home && (ctx.knownLocations ?? []).some((l) => l.locationId === home)) {
-    return { kind: 'act', proposal: { type: 'travel', targetId: home, intent: '回到本分之地', source: 'agent', locationId: here } };
+    return {
+      kind: 'act',
+      proposal: {
+        type: 'travel',
+        targetId: home,
+        intent: '回到本分之地',
+        source: 'agent',
+        locationId: here,
+      },
+    };
   }
 
   // 3) 对话需求（带冷却）→ 有目的地 talk。
@@ -77,20 +99,37 @@ export function planRoutineIntent(ctx: AgentContext): RoutineDecision {
   if (need && can('talk') && need.targetActorId !== self.actorId) {
     return {
       kind: 'act',
-      proposal: { type: 'talk', targetActorId: need.targetActorId, intent: need.reason, source: 'agent', locationId: here },
+      proposal: {
+        type: 'talk',
+        targetActorId: need.targetActorId,
+        intent: need.reason,
+        source: 'agent',
+        locationId: here,
+      },
     };
+  }
+
+  // 破境是稀有且高风险的主动选择。不能让长老/执事的固定本分动作永远遮住它；
+  // 仅当上层实时门槛已放行时，才把 cultivate/breakthrough 的取舍交给 Agent。
+  if (ctx.readyToBreakthrough && can('breakthrough')) {
+    return { kind: 'defer' };
   }
 
   // 4) 按身份的本分（确定性）：
   const role = self.role;
   // 自由弟子：此地有非社交动作 → 交 LLM 增加变化（修炼/探索/切磋…）；否则守职。
   if (role.endsWith('disciple')) {
-    return ctx.availableActions.some((a) => a !== 'talk') ? { kind: 'defer' } : { kind: 'skip', reason: 'nothing_here' };
+    return ctx.availableActions.some((a) => a !== 'talk')
+      ? { kind: 'defer' }
+      : { kind: 'skip', reason: 'nothing_here' };
   }
   // 长老/执事：闭关参悟。
   if (role === 'elder' || role === 'steward') {
     if (can('cultivate')) {
-      return { kind: 'act', proposal: { type: 'cultivate', intent: '闭关参悟', source: 'agent', locationId: here } };
+      return {
+        kind: 'act',
+        proposal: { type: 'cultivate', intent: '闭关参悟', source: 'agent', locationId: here },
+      };
     }
     return { kind: 'skip', reason: 'on_duty' };
   }

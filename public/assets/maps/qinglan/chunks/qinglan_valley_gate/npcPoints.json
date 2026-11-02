@@ -1,0 +1,55 @@
+{
+  "mapId": "qinglan_valley_gate",
+  "points": [
+    {
+      "id": "valley_guide",
+      "name": "溪谷引路弟子",
+      "kind": "guide",
+      "tile": {
+        "x": 4,
+        "y": 18
+      },
+      "locationId": "valley_west_entry"
+    },
+    {
+      "id": "resting_disciple",
+      "name": "歇脚修士",
+      "kind": "rest",
+      "tile": {
+        "x": 11,
+        "y": 10
+      },
+      "locationId": "rest_clearing"
+    },
+    {
+      "id": "bridge_guard",
+      "name": "巡桥弟子",
+      "kind": "guard",
+      "tile": {
+        "x": 20,
+        "y": 18
+      },
+      "locationId": "creek_bridge"
+    },
+    {
+      "id": "herb_gatherer",
+      "name": "采药杂役",
+      "kind": "gather",
+      "tile": {
+        "x": 16,
+        "y": 28
+      },
+      "locationId": "herb_meadow"
+    },
+    {
+      "id": "mist_sentinel",
+      "name": "雾门守卫",
+      "kind": "guard",
+      "tile": {
+        "x": 42,
+        "y": 18
+      },
+      "locationId": "mist_gate"
+    }
+  ]
+}

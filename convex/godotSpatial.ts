@@ -88,11 +88,24 @@ export function godotLocationForTile<T extends GodotLocationGeometry>(
 }
 
 export function isGodotTargetedLocalAction(type: string) {
-  return ['talk', 'trade', 'gift', 'request_teaching', 'spar', 'steal'].includes(type);
+  return [
+    'talk',
+    'negotiate',
+    'trade',
+    'gift',
+    'request_teaching',
+    'accept_request',
+    'decline_request',
+    'turn_in_request',
+    'spar',
+    'steal',
+    'attack',
+    'loot',
+  ].includes(type);
 }
 
 export function isGodotLocationLocalAction(type: string) {
-  return ['arrive', 'explore', 'cultivate', 'breakthrough'].includes(type);
+  return ['arrive', 'explore', 'inspect', 'cultivate', 'gather', 'rest', 'breakthrough', 'group_talk'].includes(type);
 }
 
 export function evaluateGodotSpatialState(args: GodotSpatialState): GodotSpatialIssue | null {

@@ -83,6 +83,47 @@ export async function readAutonomousGrowth(
   return cfg?.autonomousGrowthEnabled ?? false;
 }
 
+// C017f bounded world director. It advances sparse environment pressure, not
+// actor decisions. Missing config stays disabled.
+export const getWorldDirectorEnabled = query({
+  args: { worldId: v.id('worlds') },
+  handler: async (ctx, args): Promise<boolean> => {
+    return await readWorldDirectorEnabled(ctx, args.worldId);
+  },
+});
+
+export const setWorldDirectorEnabled = mutation({
+  args: { worldId: v.id('worlds'), enabled: v.boolean() },
+  handler: async (ctx, args) => {
+    await assertLegacyXianxiaWriteAccess(ctx, 'xianxia.config.setWorldDirectorEnabled');
+    const existing = await ctx.db
+      .query('xianxiaConfig')
+      .withIndex('byWorld', (q) => q.eq('worldId', args.worldId))
+      .first();
+    if (existing) {
+      await ctx.db.patch(existing._id, { worldDirectorEnabled: args.enabled });
+    } else {
+      await ctx.db.insert('xianxiaConfig', {
+        worldId: args.worldId,
+        autoTickEnabled: false,
+        worldDirectorEnabled: args.enabled,
+      });
+    }
+    return { worldDirectorEnabled: args.enabled };
+  },
+});
+
+export async function readWorldDirectorEnabled(
+  ctx: QueryCtx | MutationCtx,
+  worldId: Id<'worlds'>,
+): Promise<boolean> {
+  const config = await ctx.db
+    .query('xianxiaConfig')
+    .withIndex('byWorld', (q) => q.eq('worldId', worldId))
+    .first();
+  return config?.worldDirectorEnabled ?? false;
+}
+
 // 世界时钟锚点（无则 null）。submitAction 据此算当前昼夜阶段，UI 据此显示时辰。
 export async function readClockStartedAt(
   ctx: QueryCtx | MutationCtx,

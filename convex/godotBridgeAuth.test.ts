@@ -74,6 +74,9 @@ describe('godotBridgeAuth', () => {
     expect(
       authenticateGodotBridgeRequest(`Bearer ${PLAYER_TOKEN}`, 'tick:debug', config),
     ).toMatchObject({ ok: false, status: 403, errorCode: 'bridge_scope_forbidden' });
+    expect(
+      authenticateGodotBridgeRequest(`Bearer ${PLAYER_TOKEN}`, 'simulation:write', config),
+    ).toMatchObject({ ok: false, status: 403, errorCode: 'bridge_scope_forbidden' });
 
     const debug = authenticateGodotBridgeRequest(`Bearer ${DEBUG_TOKEN}`, 'tick:debug', config);
     expect(debug.ok).toBe(true);
@@ -85,6 +88,9 @@ describe('godotBridgeAuth', () => {
       ok: false,
       errorCode: 'bridge_actor_forbidden',
     });
+    expect(
+      authenticateGodotBridgeRequest(`Bearer ${DEBUG_TOKEN}`, 'simulation:write', config),
+    ).toMatchObject({ ok: true });
   });
 
   test('returns indistinguishable 401 responses for missing and invalid bearer credentials', () => {
@@ -131,6 +137,7 @@ describe('godotBridgeAuth', () => {
       configured: true,
       playerCredentialConfigured: true,
       debugTickEnabled: true,
+      simulationWriteEnabled: true,
       allowedOriginCount: 2,
       nativeClientAllowed: true,
     });

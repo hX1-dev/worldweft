@@ -46,27 +46,56 @@ func load_mask() -> bool:
 			float(image.get("width", image_size.x)),
 			float(image.get("height", image_size.y))
 		)
+	var coordinate_spaces = data.get("coordinateSpaces", {})
+	if typeof(coordinate_spaces) == TYPE_DICTIONARY:
+		var source_image = coordinate_spaces.get("sourceImage", {})
+		if typeof(source_image) == TYPE_DICTIONARY:
+			image_size = Vector2(
+				float(source_image.get("width", image_size.x)),
+				float(source_image.get("height", image_size.y))
+			)
+		var world = coordinate_spaces.get("worldTiles", {})
+		if typeof(world) == TYPE_DICTIONARY:
+			world_tiles = Vector2(
+				float(world.get("width", world_tiles.x)),
+				float(world.get("height", world_tiles.y))
+			)
 
-	var cell_mask = data.get("cellMask", {})
+	var cell_mask = data.get("cellMask", data)
 	if typeof(cell_mask) != TYPE_DICTIONARY:
 		return _fail("Navigation mask has no cellMask.")
 
 	grid_size = float(cell_mask.get("gridSize", grid_size))
+	if typeof(coordinate_spaces) == TYPE_DICTIONARY:
+		var mask_grid = coordinate_spaces.get("maskGrid", {})
+		if typeof(mask_grid) == TYPE_DICTIONARY:
+			grid_size = float(mask_grid.get("sourcePixelsPerCell", grid_size))
 	cols = ceili(image_size.x / grid_size)
 	rows = ceili(image_size.y / grid_size)
 
 	var raw_cells = cell_mask.get("cells", [])
-	if typeof(raw_cells) != TYPE_ARRAY:
-		return _fail("Navigation mask cellMask.cells is not an array.")
-
-	for cell in raw_cells:
-		if typeof(cell) != TYPE_DICTIONARY:
-			continue
-		var col := int(cell.get("col", -1))
-		var row := int(cell.get("row", -1))
-		if col < 0 or row < 0:
-			continue
-		_cells[_cell_key(Vector2i(col, row))] = str(cell.get("type", "unclassified"))
+	if typeof(raw_cells) == TYPE_ARRAY:
+		for cell in raw_cells:
+			if typeof(cell) != TYPE_DICTIONARY:
+				continue
+			var col := int(cell.get("col", -1))
+			var row := int(cell.get("row", -1))
+			if col < 0 or row < 0:
+				continue
+			_cells[_cell_key(Vector2i(col, row))] = str(cell.get("type", "unclassified"))
+	elif typeof(raw_cells) == TYPE_DICTIONARY:
+		for raw_key in raw_cells.keys():
+			var key := str(raw_key)
+			var parts := key.split(",")
+			if parts.size() != 2:
+				continue
+			var col := int(parts[0])
+			var row := int(parts[1])
+			if col < 0 or row < 0:
+				continue
+			_cells[_cell_key(Vector2i(col, row))] = str(raw_cells[raw_key])
+	else:
+		return _fail("Navigation mask cellMask.cells must be an array or dictionary.")
 
 	_loaded = true
 	mask_loaded.emit()
@@ -109,6 +138,22 @@ func get_mask_type_for_tile(tile: Vector2) -> String:
 	if not _tile_in_bounds(tile):
 		return "out_of_bounds"
 	return _mask_type_at_cell(tile_to_cell(tile))
+
+func get_mask_type_for_cell(cell: Vector2i) -> String:
+	if not _loaded:
+		return "loading"
+	return _mask_type_at_cell(cell)
+
+func cells_of_type(mask_type: String) -> Array:
+	var result: Array = []
+	if not _loaded:
+		return result
+	for row in range(rows):
+		for col in range(cols):
+			var cell := Vector2i(col, row)
+			if _mask_type_at_cell(cell) == mask_type:
+				result.append(cell)
+	return result
 
 func tile_to_cell(tile: Vector2) -> Vector2i:
 	var image_x := clampf((tile.x / world_tiles.x) * image_size.x, 0.0, image_size.x - 1.0)

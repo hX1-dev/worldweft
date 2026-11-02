@@ -51,3 +51,4 @@ func _reselect_if_possible() -> void:
 
 func _array_or_empty(value) -> Array:
 	return value if typeof(value) == TYPE_ARRAY else []
+

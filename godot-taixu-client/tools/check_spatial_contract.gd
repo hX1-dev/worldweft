@@ -2,6 +2,7 @@ extends SceneTree
 
 const NavigationMaskScript := preload("res://scripts/NavigationMask.gd")
 const LocationProbeScript := preload("res://scripts/LocationProbe.gd")
+const ValleyNpcAgentScript := preload("res://scripts/ValleyNpcAgent.gd")
 
 var failures: Array = []
 var changed_locations: Array = []
@@ -10,6 +11,7 @@ var cleared_count := 0
 func _init() -> void:
 	_check_navigation_mask()
 	_check_location_probe()
+	_check_valley_agent_position_sync()
 
 	if failures.is_empty():
 		print("Godot spatial contract check passed.")
@@ -103,6 +105,28 @@ func _check_location_probe() -> void:
 	_assert_true(probe.current_location.is_empty(), "beyond max entry distance clears")
 	_assert_equals(str(cleared_count), "2", "second clear emitted")
 	probe.free()
+
+func _check_valley_agent_position_sync() -> void:
+	var mask = NavigationMaskScript.new()
+	mask.mask_path = "res://assets/qinglan-valley-gate/cellMask.json"
+	mask.world_tiles = Vector2(48.0, 36.0)
+	_assert_true(mask.load_mask(), "valley mask loads for position sync")
+
+	var agent = ValleyNpcAgentScript.new()
+	agent.navigation_mask = mask
+	var confirmed := Vector2(11.375, 10.0)
+	_assert_true(agent.sync_confirmed_tile(confirmed), "idle valley agent accepts confirmed fractional tile")
+	_assert_vector_near(agent.logical_tile_position(), confirmed, 0.001, "confirmed fractional tile is preserved")
+	_assert_true(mask.is_tile_walkable(agent.position / 32.0), "confirmed tile remains inside walkable mask")
+
+	agent.active_goal = {"commandId": "active-contract-goal"}
+	_assert_false(agent.sync_confirmed_tile(Vector2(4.0, 18.0)), "active valley agent rejects position sync")
+	_assert_vector_near(agent.logical_tile_position(), confirmed, 0.001, "rejected active sync leaves position unchanged")
+	agent.active_goal.clear()
+	_assert_false(agent.sync_confirmed_tile(Vector2(0.0, 0.0)), "blocked valley mask tile rejects position sync")
+	_assert_vector_near(agent.logical_tile_position(), confirmed, 0.001, "rejected blocked sync leaves position unchanged")
+	agent.free()
+	mask.free()
 
 func _on_location_changed(location: Dictionary) -> void:
 	changed_locations.append(str(location.get("locationId", "")))

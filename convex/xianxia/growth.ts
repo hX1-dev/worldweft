@@ -2,18 +2,33 @@ import { v } from 'convex/values';
 import { internalMutation } from '../_generated/server';
 import type { MutationCtx } from '../_generated/server';
 import type { Doc, Id } from '../_generated/dataModel';
-import { autoCultivationGain, proposeBonds, BOND_THRESHOLD, type BondKind, type BondPair } from './cultivationLogic';
+import {
+  autoCultivationGain,
+  proposeBonds,
+  BOND_THRESHOLD,
+  type BondKind,
+  type BondPair,
+} from './cultivationLogic';
 import { breakthroughThreshold, realmMaxStage } from './rules';
 import { autoAdvanceLayers, loadProfile } from './actions';
 import { appendWorldEvent } from './events';
 import { versionDurableEventFacts } from './durableContracts';
 import { readClockStartedAt } from './config';
 import { gameTimeAt, phaseModifiers } from './timeLogic';
+import { isActorDeceased, isActorIncapacitated } from './lifeStateLogic';
+import { relationshipDimsAt } from './relationshipLogic';
 
 const MAX_GROWTH_PROFILES = 32;
 const MAX_GROWTH_LOCATIONS = 128;
 const MAX_BOND_RELATIONSHIPS_PER_ACTOR = 8;
 const MAX_BOND_PAIRS = 64;
+
+export function isAutonomousGrowthEligible(profile: {
+  health: number;
+  lifeStatus?: 'alive' | 'deceased';
+}) {
+  return !isActorDeceased(profile) && !isActorIncapacitated(profile.health);
+}
 
 // 自主成长 tick（鬼谷仿造 · G，命门）。确定性、无 LLM、通过持久游标分批覆盖全员：
 //   1) 每个角色轮到时得「背景修为涓流」并兑现境内升层——守职者(商贩/守卫)、未被动作循环选中者也不停滞；
@@ -63,7 +78,12 @@ export const tickAutonomousGrowth = internalMutation({
 
     // 1) 全员背景涓流 + 兑现境内升层（只在攒够且非大关时才调 autoAdvanceLayers，省无谓读写）。
     let advanced = 0;
+    let skippedIncapacitated = 0;
     for (const p of profiles) {
+      if (!isAutonomousGrowthEligible(p)) {
+        skippedIncapacitated++;
+        continue;
+      }
       const energy = (p.currentLocationId && energyOf.get(p.currentLocationId)) || 0;
       const gain = autoCultivationGain({
         spiritualEnergy: energy,
@@ -83,7 +103,8 @@ export const tickAutonomousGrowth = internalMutation({
     }
 
     // 2) 关系网生长。
-    const bonds = await formBonds(ctx, worldId, profiles, now, gameDay);
+    const growthEligibleProfiles = profiles.filter(isAutonomousGrowthEligible);
+    const bonds = await formBonds(ctx, worldId, growthEligibleProfiles, now, gameDay);
 
     const nextAfterActorId = profiles.at(-1)?.actorId;
     if (config && nextAfterActorId) {
@@ -91,7 +112,8 @@ export const tickAutonomousGrowth = internalMutation({
     }
 
     return {
-      cultivated: profiles.length,
+      cultivated: growthEligibleProfiles.length,
+      skippedIncapacitated,
       advanced,
       bonds,
       startAfterActorId: afterActorId,
@@ -122,23 +144,40 @@ async function formBonds(
       .take(MAX_BOND_RELATIONSHIPS_PER_ACTOR);
     for (const r of rels) {
       if (pairs.length >= MAX_BOND_PAIRS) break;
-      if (r.value < BOND_THRESHOLD) continue;
+      const effective = relationshipDimsAt(
+        { affinity: r.value, trust: r.trust, suspicion: r.suspicion, debt: r.debt, fear: r.fear },
+        r.lastTouchedDay,
+        gameDay,
+        p.innerTrait ?? '',
+        p.outerTrait ?? '',
+        r.dimensionTouchedDays,
+      );
+      if (effective.affinity < BOND_THRESHOLD) continue;
       let other = pmap.get(r.toActorId);
       if (!other) {
         other = (await loadProfile(ctx, worldId, r.toActorId)) ?? undefined;
         if (other) pmap.set(other.actorId, other);
       }
-      if (!other) continue;
+      if (!other || !isAutonomousGrowthEligible(other)) continue;
       const key = [p.actorId, r.toActorId].sort().join('::');
       if (seen.has(key)) continue;
       seen.add(key);
       const back = await loadRel(ctx, worldId, r.toActorId, p.actorId);
-      if (!back || back.value < BOND_THRESHOLD) continue; // 须双向都深
+      if (!back) continue;
+      const effectiveBack = relationshipDimsAt(
+        { affinity: back.value, trust: back.trust, suspicion: back.suspicion, debt: back.debt, fear: back.fear },
+        back.lastTouchedDay,
+        gameDay,
+        other.innerTrait ?? '',
+        other.outerTrait ?? '',
+        back.dimensionTouchedDays,
+      );
+      if (effectiveBack.affinity < BOND_THRESHOLD) continue; // 须双向都深
       pairs.push({
         a: p.actorId,
         b: r.toActorId,
-        affinityAB: r.value,
-        affinityBA: back.value,
+        affinityAB: effective.affinity,
+        affinityBA: effectiveBack.affinity,
         aInner: p.innerTrait ?? '',
         aOuter: p.outerTrait ?? '',
         bInner: other.innerTrait ?? '',
@@ -150,10 +189,9 @@ async function formBonds(
 
   const proposals = proposeBonds(pairs);
   for (const bp of proposals) {
-    await tagBond(ctx, worldId, bp.a, bp.b, bp.kind, gameDay);
     const an = pmap.get(bp.a)?.name ?? bp.a;
     const bn = pmap.get(bp.b)?.name ?? bp.b;
-    await appendWorldEvent(ctx, {
+    const eventId = await appendWorldEvent(ctx, {
       worldId,
       type: 'bond_formed',
       createdAt: now,
@@ -163,6 +201,7 @@ async function formBonds(
       summary: `${an}与${bn}${bp.reason}。`,
       facts: versionDurableEventFacts({ resultCode: 'bond_formed', kind: bp.kind }),
     });
+    await tagBond(ctx, worldId, bp.a, bp.b, bp.kind, eventId);
   }
   return proposals.length;
 }
@@ -174,14 +213,14 @@ async function loadRel(ctx: MutationCtx, worldId: Id<'worlds'>, from: string, to
     .first();
 }
 
-// 给 a↔b 两向关系都打上缔结标签（避免下次重复缔结），并戳记游戏日。
+// 给 a↔b 两向关系打标签并引用 bond event；标签不应重置数值维度的衰减时钟。
 async function tagBond(
   ctx: MutationCtx,
   worldId: Id<'worlds'>,
   a: string,
   b: string,
   kind: BondKind,
-  gameDay: number,
+  eventId: Id<'worldEvents'>,
 ) {
   for (const [from, to] of [
     [a, b],
@@ -191,6 +230,9 @@ async function tagBond(
     if (!rel) continue;
     const tags = new Set(rel.tags ?? []);
     tags.add(kind);
-    await ctx.db.patch(rel._id, { tags: [...tags], lastTouchedDay: gameDay });
+    await ctx.db.patch(rel._id, {
+      tags: [...tags],
+      lastChangedByEventId: eventId,
+    });
   }
 }

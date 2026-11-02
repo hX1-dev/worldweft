@@ -83,7 +83,9 @@ func _run() -> void:
 	_assert(main.action_buttons.has("gift"), "gift button exists")
 	_assert(main.action_buttons.has("trade"), "trade button exists")
 	_assert(main.action_buttons.has("cultivate"), "cultivate button exists")
+	_assert(main.action_buttons.has("rest"), "rest button exists")
 	_assert(main.action_buttons.has("breakthrough"), "breakthrough button exists")
+	_assert(main.action_buttons.has("use_item"), "self healing item button exists")
 	_assert(not main.action_buttons.has("arrive"), "hidden arrive action is not rendered")
 	_assert(main.action_option_selectors.has("trade"), "trade selector exists")
 	_assert(main.action_option_selectors["trade"].get_item_count() == 1, "trade selector has option")
@@ -91,6 +93,19 @@ func _run() -> void:
 	_assert(str(main.action_buttons["breakthrough"].tooltip_text).contains("not ready"), "disabled reason appears as tooltip")
 	_assert(main.action_detail_label.visible == true, "action detail panel visible")
 	_assert(str(main.action_detail_label.text).contains("Selection:"), "action detail includes selected option policy")
+	_assert(str(main.action_detail_label.text).contains("Use item: Healing Pill (healing_pill) x1"), "action detail includes healing item cost and effect")
+	_assert(str(main.action_detail_label.text).contains("health 5 -> 8/8 (+3, up to 3)"), "action detail includes health cap")
+	_assert(main.player.movement_enabled == true, "conscious injured actor can move")
+	_assert(str(main.status_label.text).contains("fatigue 35/100 (weary)"), "HUD renders server fatigue and band")
+	var incapacitated_payload := _capabilities(resident, location)
+	incapacitated_payload["actorState"] = { "health": 0, "maxHealth": 8, "lifeState": "incapacitated" }
+	main._on_capabilities_received(incapacitated_payload)
+	var stopped_position: Vector2 = main.player.position
+	_assert(main.player.movement_enabled == false, "incapacitated actor disables direct player movement")
+	_assert(not main.player._try_move_to(stopped_position + Vector2(32.0, 0.0)), "incapacitated player rejects programmatic movement")
+	_assert(main.player.position == stopped_position, "incapacitated player remains at the confirmed tile")
+	main._on_capabilities_received(_capabilities(resident, location))
+	_assert(main.player.movement_enabled == true, "conscious actor can move after a fresh capability response")
 
 	var correct_payload := _capabilities(resident, location)
 	_assert(main._capabilities_matches_current_context(correct_payload), "current capabilities accepted")
@@ -124,6 +139,17 @@ func _run() -> void:
 	_assert(mock_action_client.calls.size() == 2, "stale confirmation does not submit")
 	_assert(main.confirmation_panel.visible == false, "stale confirmation closes")
 	main.store.selected_resident = resident
+
+	var use_item_capability: Dictionary = main.action_buttons["use_item"].get_meta("capability")
+	main._submit_menu_action(use_item_capability)
+	_assert(mock_action_client.calls.size() == 2, "using a healing item waits for confirmation")
+	_assert(main.confirmation_panel.visible == true, "healing item shows confirmation")
+	_assert(str(main.confirmation_title_label.text) == "Confirm Use Item", "healing item has a specific confirmation title")
+	_assert(str(main.confirmation_body_label.text).contains("Inventory 2 -> 1"), "healing confirmation shows inventory consumption")
+	_assert(str(main.confirmation_body_label.text).contains("Health 5 -> 8/8 (+3; restores up to 3)"), "healing confirmation shows bounded recovery")
+	main._confirm_pending_action()
+	_assert(mock_action_client.calls.size() == 3, "confirmed healing item submits")
+	_assert(str(mock_action_client.calls[2]["capability"].get("type", "")) == "use_item", "confirmed healing submission preserves action type")
 
 	main._on_action_changed(_action_payload())
 	_assert(main.trace_entries.size() >= 1, "action trace recorded")
@@ -294,6 +320,23 @@ func _capabilities(resident: Dictionary, location: Dictionary) -> Dictionary:
 			],
 		},
 	}
+	var healing_option := {
+		"label": "Healing Pill x1",
+		"params": { "itemId": "healing_pill" },
+		"itemName": "Healing Pill",
+		"itemId": "healing_pill",
+		"qtyAvailable": 2,
+		"healValue": 3,
+		"effectiveHeal": 3,
+		"currentHealth": 5,
+		"maxHealth": 8,
+		"confirmationPreview": _confirmation_preview("use_item"),
+		"inventoryDeltaPreview": {
+			"deltas": [
+				{ "owner": "actor", "itemName": "Healing Pill", "before": 2, "after": 1, "delta": -1 },
+			],
+		},
+	}
 	return {
 		"ok": true,
 		"worldId": "world_main_contract",
@@ -301,6 +344,7 @@ func _capabilities(resident: Dictionary, location: Dictionary) -> Dictionary:
 		"actorId": "godot_player",
 		"actorTile": { "x": 35.0, "y": 30.0 },
 		"interactionRangeTiles": 5.0,
+		"actorState": { "health": 5, "maxHealth": 8, "lifeState": "injured", "fatigue": 35, "fatigueBand": "weary" },
 		"target": {
 			"actorId": resident.actorId,
 			"name": resident.name,
@@ -314,8 +358,10 @@ func _capabilities(resident: Dictionary, location: Dictionary) -> Dictionary:
 			{ "type": "gift", "label": "Gift", "enabled": true, "reason": null, "category": "target", "targetActorId": resident.actorId, "intent": "赠一枚灵石", "params": { "itemId": "spirit_stone" }, "options": [gift_option], "visible": true },
 			{ "type": "trade", "label": "Trade", "enabled": true, "reason": null, "category": "target", "targetActorId": resident.actorId, "intent": "交易灵草", "params": trade_option.params, "options": [trade_option], "visible": true },
 			{ "type": "cultivate", "label": "Cultivate", "enabled": true, "reason": null, "category": "location", "locationId": location.locationId, "intent": "吐纳修行", "params": {}, "visible": true },
+			{ "type": "rest", "label": "Rest", "enabled": false, "reason": "Current location does not allow rest.", "category": "location", "locationId": location.locationId, "intent": "稍作休息", "params": {}, "visible": true },
 			{ "type": "arrive", "label": "Arrive", "enabled": true, "reason": null, "category": "location", "locationId": location.locationId, "intent": "抵达", "params": {}, "visible": false },
 			{ "type": "breakthrough", "label": "Breakthrough", "enabled": false, "reason": "not ready", "category": "location", "locationId": location.locationId, "intent": "尝试突破", "params": {}, "visible": true },
+			{ "type": "use_item", "label": "Use Healing Pill", "enabled": true, "reason": null, "category": "self", "intent": "服用疗伤丹恢复气血", "params": { "itemId": "healing_pill" }, "currentHealth": 5, "maxHealth": 8, "effectiveHeal": 3, "options": [healing_option], "visible": true },
 		],
 	}
 

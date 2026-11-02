@@ -20,6 +20,7 @@ const COLLISION_SAMPLE_OFFSETS := [
 
 var navigation_mask
 var _blocked_cooldown := 0.0
+var movement_enabled := true
 
 func _ready() -> void:
 	position = Vector2(35.0, 30.0) * tile_size
@@ -29,8 +30,13 @@ func configure_navigation(mask) -> void:
 	if navigation_mask != null and navigation_mask.is_loaded():
 		_snap_to_walkable()
 
+func set_movement_enabled(enabled: bool) -> void:
+	movement_enabled = enabled
+
 func _process(delta: float) -> void:
 	_blocked_cooldown = maxf(0.0, _blocked_cooldown - delta)
+	if not movement_enabled:
+		return
 	var direction := Input.get_vector("ui_left", "ui_right", "ui_up", "ui_down")
 	if direction.length_squared() > 0.0:
 		var desired := position + direction.normalized() * speed * delta
@@ -52,6 +58,8 @@ func _draw() -> void:
 	draw_arc(Vector2.ZERO, 13.0, 0.0, TAU, 24, Color(0.03, 0.18, 0.28), 3.0)
 
 func _try_move_to(desired: Vector2) -> bool:
+	if not movement_enabled:
+		return false
 	if _can_stand_at_pixel(desired):
 		position = desired
 		return true

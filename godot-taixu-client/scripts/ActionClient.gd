@@ -122,29 +122,37 @@ func submit_capability(
 		}
 	}
 
-	if interaction_range_tiles > 0.0:
+	var category := str(capability.get("category", ""))
+	var is_self_action := category == "self" or ActionMenuPolicyScript.is_self_action(action_type)
+	if interaction_range_tiles > 0.0 and not is_self_action:
 		payload["interactionRangeTiles"] = interaction_range_tiles
 
-	var category := str(capability.get("category", ""))
 	if category == "target" or ActionMenuPolicyScript.is_target_action(action_type):
 		if resident.is_empty():
 			action_rejected_locally.emit("Select a resident first.")
 			return
 		payload["targetActorId"] = str(capability.get("targetActorId", resident.get("actorId", "")))
 
-	var location_id := str(capability.get("locationId", ""))
-	if location_id == "" and not location.is_empty():
-		location_id = str(location.get("locationId", ""))
-	if location_id == "" and not resident.is_empty():
-		location_id = str(resident.get("locationId", ""))
-	if location_id != "":
-		payload["locationId"] = location_id
-	elif category == "location" or ActionMenuPolicyScript.is_location_action(action_type):
-		action_rejected_locally.emit("Enter a location first.")
-		return
+	if not is_self_action:
+		var location_id := str(capability.get("locationId", ""))
+		if location_id == "" and not location.is_empty():
+			location_id = str(location.get("locationId", ""))
+		if location_id == "" and not resident.is_empty():
+			location_id = str(resident.get("locationId", ""))
+		if location_id != "":
+			payload["locationId"] = location_id
+		elif category == "location" or ActionMenuPolicyScript.is_location_action(action_type):
+			action_rejected_locally.emit("Enter a location first.")
+			return
 
 	var params = _capability_params(capability)
-	if typeof(params) == TYPE_DICTIONARY:
+	if action_type == "use_item":
+		var item_id := str(params.get("itemId", "")) if typeof(params) == TYPE_DICTIONARY else ""
+		if item_id == "":
+			action_rejected_locally.emit("Healing item has no itemId.")
+			return
+		payload["params"] = { "itemId": item_id }
+	elif typeof(params) == TYPE_DICTIONARY:
 		payload["params"] = params
 
 	bridge.post_action(payload)
@@ -157,7 +165,7 @@ func _next_client_action_id(action_type: String) -> String:
 
 func _capability_params(capability: Dictionary):
 	var selected_option = capability.get("selectedOption", {})
-	if typeof(selected_option) == TYPE_DICTIONARY:
+	if typeof(selected_option) == TYPE_DICTIONARY and not selected_option.is_empty():
 		var selected_params = selected_option.get("params", {})
 		if typeof(selected_params) == TYPE_DICTIONARY:
 			return selected_params
@@ -182,14 +190,28 @@ func _default_intent(action_type: String) -> String:
 			return "赠出一份薄礼"
 		"request_teaching":
 			return "请教修行经验"
+		"accept_request":
+			return "当面接受这桩委托"
+		"decline_request":
+			return "当面婉拒这桩委托"
+		"turn_in_request":
+			return "当面交付已经完成的委托"
 		"spar":
 			return "请求切磋"
+		"attack":
+			return "向目标发起敌对攻击"
+		"flee":
+			return "尝试脱离当前敌对冲突"
+		"loot":
+			return "从已被击倒的目标处取走一件战利品"
 		"explore":
 			return "探查当前地点"
 		"cultivate":
 			return "吐纳修行"
 		"breakthrough":
 			return "尝试突破"
+		"use_item":
+			return "服用疗伤丹恢复气血"
 		_:
 			return "执行 " + action_type
 

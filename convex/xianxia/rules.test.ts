@@ -1,4 +1,5 @@
 import {
+  canAttemptRealmBreakthrough,
   clamp,
   realmRank,
   resolveBreakthrough,
@@ -10,6 +11,7 @@ import {
   resolveSteal,
   resolveTalk,
   resolveTrade,
+  resolveUseItem,
   seededRoll,
   type ActorSnapshot,
   type LocationSnapshot,
@@ -24,11 +26,47 @@ const actor: ActorSnapshot = {
   cultivationXp: 0,
   mood: 0,
   health: 8,
+  maxHealth: 10,
   spirit: 7,
   reputation: 0,
   currentLocationId: 'mountain_gate',
   inventory: [{ itemId: 'healing_pill', qty: 1 }],
 };
+
+describe('resolveUseItem', () => {
+  it('从真实库存消耗一枚疗伤丹并按目录恢复气血', () => {
+    expect(resolveUseItem({ actor: { ...actor, health: 4 }, itemId: 'healing_pill' })).toMatchObject({
+      status: 'applied',
+      resultCode: 'healing_item_used',
+      effects: {
+        health: 3,
+        items: [{ from: 'test_cultivator', itemId: 'healing_pill', qty: 1 }],
+      },
+      eventType: 'item_used',
+    });
+  });
+
+  it('接近上限时只记录实际恢复量，永不越过 maxHealth', () => {
+    expect(resolveUseItem({ actor: { ...actor, health: 9 }, itemId: 'healing_pill' })).toMatchObject({
+      status: 'applied',
+      effects: { health: 1 },
+    });
+  });
+
+  it.each<[ActorSnapshot, string, string]>([
+    [{ ...actor, health: 0 }, 'healing_pill', 'actor_incapacitated'],
+    [{ ...actor, health: 10 }, 'healing_pill', 'health_already_full'],
+    [{ ...actor, inventory: [] }, 'healing_pill', 'item_not_owned'],
+    [{ ...actor, inventory: [{ itemId: 'qi_pill', qty: 1 }] }, 'qi_pill', 'item_not_healing'],
+    [{ ...actor, inventory: [{ itemId: 'mystery_pill', qty: 1 }] }, 'mystery_pill', 'unknown_item'],
+  ])('拒绝非法自疗且不产生任何效果', (testActor, itemId, resultCode) => {
+    expect(resolveUseItem({ actor: testActor, itemId })).toMatchObject({
+      status: 'rejected',
+      resultCode,
+      effects: {},
+    });
+  });
+});
 
 const peer: ActorSnapshot = { ...actor, actorId: 'peer', name: '同门', inventory: [] };
 const master: ActorSnapshot = { ...actor, actorId: 'elder', name: '长老', realm: 'golden_core', inventory: [] };
@@ -45,7 +83,7 @@ const mountainGate: LocationSnapshot = {
   kind: 'mountain_gate',
   dangerLevel: 0,
   spiritualEnergy: 3,
-  allowedActions: ['cultivate', 'talk', 'request_teaching', 'spar'],
+  allowedActions: ['cultivate', 'breakthrough', 'talk', 'request_teaching', 'spar'],
 };
 const secretGate: LocationSnapshot = {
   ...mountainGate,
@@ -74,22 +112,132 @@ describe('resolveCultivate', () => {
     expect(resolveCultivate({ actor, location: mountainGate, roll: 0.97 }).resultCode).toBe('cultivation_breakthrough_insight');
     expect(resolveCultivate({ actor, location: mountainGate, roll: 0.01 }).resultCode).toBe('cultivation_deviation');
   });
+  it('地点灵气只在 0..10 内参与结算', () => {
+    expect(
+      resolveCultivate({ actor, location: { ...mountainGate, spiritualEnergy: -50 }, roll: 0.5 })
+        .effects.cultivationXp,
+    ).toBe(7);
+    expect(
+      resolveCultivate({ actor, location: { ...mountainGate, spiritualEnergy: 50 }, roll: 0.5 })
+        .effects.cultivationXp,
+    ).toBe(17);
+  });
+  it('灵石与聚气丹产生目录约束的加成和真实消耗 effect', () => {
+    const stocked = {
+      ...actor,
+      inventory: [
+        { itemId: 'spirit_stone', qty: 2 },
+        { itemId: 'qi_pill', qty: 1 },
+      ],
+    };
+    expect(
+      resolveCultivate({
+        actor: stocked,
+        location: mountainGate,
+        roll: 0.5,
+        cultivationMode: 'spirit_stone',
+      }),
+    ).toMatchObject({
+      status: 'applied',
+      effects: {
+        cultivationXp: 13,
+        items: [{ from: actor.actorId, itemId: 'spirit_stone', qty: 1 }],
+      },
+    });
+    expect(
+      resolveCultivate({
+        actor: stocked,
+        location: mountainGate,
+        roll: 0.5,
+        cultivationMode: 'qi_pill',
+      }),
+    ).toMatchObject({
+      status: 'applied',
+      effects: {
+        cultivationXp: 20,
+        items: [{ from: actor.actorId, itemId: 'qi_pill', qty: 1 }],
+      },
+    });
+  });
+  it('聚气玉坠只应用一次目录加成且不消耗', () => {
+    const result = resolveCultivate({
+      actor: {
+        ...actor,
+        inventory: [
+          { itemId: 'qi_pendant', qty: 9 },
+          { itemId: 'spirit_stone', qty: 1 },
+        ],
+      },
+      location: mountainGate,
+      roll: 0.5,
+      cultivationMode: 'spirit_stone',
+    });
+    expect(result.effects.cultivationXp).toBe(14);
+    expect(result.effects.items).toEqual([
+      { from: actor.actorId, itemId: 'spirit_stone', qty: 1 },
+    ]);
+  });
+  it('非法模式和缺少明确请求的资源都拒绝，绝不降级 ambient', () => {
+    expect(
+      resolveCultivate({ actor, location: mountainGate, roll: 0.5, cultivationMode: 'cheat' })
+        .resultCode,
+    ).toBe('invalid_cultivation_mode');
+    expect(
+      resolveCultivate({
+        actor,
+        location: mountainGate,
+        roll: 0.5,
+        cultivationMode: 'spirit_stone',
+      }).resultCode,
+    ).toBe('cultivation_resource_unavailable');
+  });
 });
 
 describe('resolveBreakthrough', () => {
   const ready = { ...actor, cultivationXp: 100, mood: 0 }; // 练气1（境内），阈值 = 55
   const peak = { ...actor, realm: 'qi_refining', realmStage: 9, cultivationXp: 999 }; // 练气9（跨境大关）
 
+  it('Agent 手动突破门槛只放行修为已足且未封顶的跨境大关', () => {
+    expect(canAttemptRealmBreakthrough('qi_refining', 1, 999)).toBe(false);
+    expect(canAttemptRealmBreakthrough('qi_refining', 9, 1)).toBe(false);
+    expect(canAttemptRealmBreakthrough('qi_refining', 9, 999)).toBe(true);
+    expect(canAttemptRealmBreakthrough('deity_transformation', 3, 9999)).toBe(false);
+  });
+
   it('修为不足 → 拒绝', () => {
     const r = resolveBreakthrough({ actor: { ...actor, cultivationXp: 10 }, location: mountainGate, roll: 0.1, mishapRoll: 0.9 });
     expect(r.resultCode).toBe('insufficient_cultivation');
   });
-  it('境内升层：一路直达，高 roll 也成功、不伤身，local 可见', () => {
+  it('地点不允许突破 → 拒绝且无境界变化', () => {
+    const r = resolveBreakthrough({
+      actor: peak,
+      location: secretGate,
+      roll: 0.01,
+      mishapRoll: 0.9,
+    });
+    expect(r.resultCode).toBe('location_forbids_breakthrough');
+    expect(r.effects.realmChange).toBeUndefined();
+  });
+  it('化神圆满是世界上限，不会循环回化神一层', () => {
+    const r = resolveBreakthrough({
+      actor: {
+        ...actor,
+        realm: 'deity_transformation',
+        realmStage: 3,
+        cultivationXp: 9999,
+      },
+      location: mountainGate,
+      roll: 0.01,
+      mishapRoll: 0.9,
+    });
+    expect(r.resultCode).toBe('realm_cap_reached');
+    expect(r.effects.realmChange).toBeUndefined();
+  });
+  it('境内升层由自动规则处理，手动高风险突破明确拒绝', () => {
     const r = resolveBreakthrough({ actor: ready, location: mountainGate, roll: 0.99, mishapRoll: 0.99 });
-    expect(r.resultCode).toBe('breakthrough_success');
-    expect(r.effects.realmChange).toEqual({ realm: 'qi_refining', realmStage: 2, cultivationXp: 45 });
-    expect(r.effects.health).toBeUndefined(); // 境内升层不伤气血
-    expect(r.visibility).toBe('local');
+    expect(r.resultCode).toBe('breakthrough_not_realm_gate');
+    expect(r.status).toBe('rejected');
+    expect(r.effects).toEqual({});
   });
   it('跨境大关成功：练气9 → 筑基，public 可见', () => {
     const r = resolveBreakthrough({ actor: peak, location: mountainGate, roll: 0.01, mishapRoll: 0.9 });
@@ -114,10 +262,12 @@ describe('resolveTalk', () => {
   it('关系过差 → 拒绝', () => {
     expect(resolveTalk({ actor, target: peer, relationship: -60, roll: 0.5 }).resultCode).toBe('relationship_too_hostile');
   });
-  it('相谈尚欢：关系+2', () => {
+  it('相谈尚欢：会话和短暂心情成立，但不凭说话写持久关系', () => {
     const r = resolveTalk({ actor, target: peer, relationship: 0, roll: 0.5 });
-    expect(r.status).toBe('applied');
-    expect(r.effects.relationships).toEqual([{ targetActorId: 'peer', delta: 2 }]);
+    expect(r).toMatchObject({
+      status: 'applied', resultCode: 'conversation_started', eventType: 'conversation_started',
+      effects: { mood: 1, relationships: [] },
+    });
   });
   it('冷场（roll<0.2）：无关系变化', () => {
     const r = resolveTalk({ actor, target: peer, relationship: 0, roll: 0.1 });
@@ -151,7 +301,8 @@ describe('resolveExplore', () => {
     expect(resolveExplore({ actor, location: secretGate, roll: 0.6 }).resultCode).toBe('exploration_rumor');
     const lucky = resolveExplore({ actor, location: secretGate, roll: 0.9 });
     expect(lucky.resultCode).toBe('exploration_resource');
-    expect(lucky.effects.items).toEqual([{ to: 'test_cultivator', itemId: 'spirit_herb', qty: 1 }]);
+    expect(lucky.effects.items).toBeUndefined();
+    expect(lucky.effects.cultivationXp).toBeGreaterThan(0);
   });
 });
 
