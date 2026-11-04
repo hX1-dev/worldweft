@@ -71,6 +71,11 @@ function sum(values) {
   return values.reduce((total, value) => total + value, 0);
 }
 
+// AI 没回上来（超时、出错、读不懂、出戏），换成了规则的话；核对没过换掉的另算。
+function notAnswered(turn) {
+  return Boolean((turn.ai?.rejected && turn.ai.rejected !== 'dialogue_reply_guarded') || turn.ai?.error);
+}
+
 function computeStats() {
   const records = state.conversations;
   const all = records.flatMap((record) => record.conversation.turns.map((turn, index) => ({ record, turn, index })));
@@ -123,7 +128,13 @@ function computeStats() {
     flagsAi: flagged.filter(({ turn }) => turn.by === 'ai').length,
     checkIssues: checkIssues.length + leaks.length,
     checkDetails: [...checkIssues, ...leaks.map((leak) => ({ ...leak, mention: 'modern_word' }))],
-    fallbacks: aiLines.filter(({ turn }) => turn.ai?.rejected || turn.ai?.error).length,
+    // 核对没过的："重说"是 AI 重说一次就对了，"换掉"是重说还不对、换成了规则的话（不算"没回上来"）。
+    fallbacks: aiLines.filter(({ turn }) => notAnswered(turn)).length,
+    guardRetried: aiLines.filter(({ turn }) => turn.ai?.guard?.outcome === 'retried').length,
+    guardFallback: aiLines.filter(({ turn }) => turn.ai?.guard?.outcome === 'fallback').length,
+    guardDetails: aiLines
+      .filter(({ turn }) => turn.ai?.guard)
+      .map(({ record, turn }) => ({ npc: record.name, blocked: turn.ai.guard.blocked, flagged: turn.ai.guard.flagged, outcome: turn.ai.guard.outcome, said: turn.text })),
     // 好感度：骂人几回、他翻脸走了几回、不理你几回、听说你骂过人的有几个。
     offenses: sum(records.map((record) => record.conversation.offenses.length)),
     stormOffs: records.filter((record) => record.conversation.closedBy === 'npc_angry').length,
@@ -155,9 +166,10 @@ function publicTurn(record, turn, index, turns) {
               tokens: (usage.prompt_tokens ?? 0) + (usage.completion_tokens ?? 0) || undefined,
               hit: usage.prompt_cache_hit_tokens,
               ms: turn.ai?.ms,
-              fallback: Boolean(turn.ai?.rejected || turn.ai?.error),
+              fallback: notAnswered(turn),
               deduped: Boolean(turn.ai?.deduped),
               tone: turn.ai?.tone,
+              guard: turn.ai?.guard ? { outcome: turn.ai.guard.outcome, flagged: turn.ai.guard.flagged } : undefined,
             },
   };
 }

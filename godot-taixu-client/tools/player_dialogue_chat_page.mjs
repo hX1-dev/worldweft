@@ -220,6 +220,7 @@ function sourceText(turn) {
   if (turn.source.ms) bits.push((turn.source.ms / 1000).toFixed(1) + ' 秒');
   if (turn.source.fallback) bits.push('没回上来，换成了规则的话');
   if (turn.source.deduped) bits.push('删了重复的半句');
+  if (turn.source.guard) bits.push(turn.source.guard.outcome === 'retried' ? '核对没过，重说了一次' : '核对两回没过，换成了规则的话');
   return bits.join(' · ');
 }
 
@@ -326,6 +327,7 @@ function renderStats() {
     ['听说你骂过人的', s.rumorHeardBy + ' 人'],
     ['自动检查对不上', s.checkIssues + ' 处'],
     ['AI 没回上来', s.fallbacks + ' 句'],
+    ['说出口前拦下', (s.guardRetried + s.guardFallback) + ' 句（重说 ' + s.guardRetried + '，换掉 ' + s.guardFallback + '）'],
   ];
   const list = el('dl');
   for (const [name, value] of rows) list.append(el('dt', '', name), el('dd', '', value));

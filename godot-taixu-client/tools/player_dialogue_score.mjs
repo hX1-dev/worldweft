@@ -249,10 +249,12 @@ if (live) {
     : null;
   // 参考：缓存全热时的全价（标准 F2 用的是上面那个；这个只为不同轮次能对着比）。全价跟着缓存命中起伏很大，
   // 这里把每个 NPC 这一轮命中最多的那次当作他固定部分的长度，每次只算剩下的输入加输出。
+  // （v1.8：重说一次是两次调用，usage 是两次加起来的；这里按每次调用算，calls 里是各次的 usage。）
+  const callsOf = (turn) => turn.ai?.calls ?? [turn.ai?.usage ?? {}];
   const fixedPart = {};
   for (const conversation of conversations) {
     for (const turn of npcTurns(conversation).filter((entry) => entry.by === 'ai')) {
-      fixedPart[conversation.actorId] = Math.max(fixedPart[conversation.actorId] ?? 0, turn.ai?.usage?.prompt_cache_hit_tokens ?? 0);
+      for (const call of callsOf(turn)) fixedPart[conversation.actorId] = Math.max(fixedPart[conversation.actorId] ?? 0, call.prompt_cache_hit_tokens ?? 0);
     }
   }
   const warmUncached = live
@@ -262,7 +264,11 @@ if (live) {
             .filter((turn) => turn.by === 'ai')
             .reduce(
               (sum, turn) =>
-                sum + (turn.ai?.usage?.prompt_tokens ?? 0) - fixedPart[conversation.actorId] + (turn.ai?.usage?.completion_tokens ?? 0),
+                sum +
+                callsOf(turn).reduce(
+                  (callSum, call) => callSum + (call.prompt_tokens ?? 0) - fixedPart[conversation.actorId] + (call.completion_tokens ?? 0),
+                  0,
+                ),
               0,
             ),
         )

@@ -99,9 +99,12 @@ baseline trajectory digests (`npm run life:check-baseline`).
 said, decides whether the resident opens, how many lines they give, when they
 leave, what they remember, and how affinity moves (`playerAffinityLogic.ts`).
 The model receives a persona card, a fact sheet, and the situation, and writes
-one line at a time. It cannot change affinity, memory, or world facts; the
-checker in `godot-taixu-client/tools/player_dialogue_checks.mjs` flags lines
-that invent people, places, routes, promises, or pasts.
+one line at a time. It cannot change affinity, memory, or world facts. Each
+line goes through the checker in
+`godot-taixu-client/tools/player_dialogue_checks.mjs` before it is spoken; a
+line that invents people, places, routes, names, promises, or pasts is sent
+back once with the reason, and replaced by a rule line if the retry is still
+wrong. Facts the player asked about stay in the prompt for the next two lines.
 
 ## Reference-World Boundary
 
