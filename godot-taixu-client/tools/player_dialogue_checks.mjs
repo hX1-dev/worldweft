@@ -33,12 +33,14 @@ export const ITEM_CLAIM = /(?:还有|有)(?:[一二两三四五几]|好几)株|�
 // 世界里只有五处地方，说出别的店铺、灶房、客栈之类就是编的（v1.5 补：道歉这轮试玩里的"院里灶上还温着些"）；
 // v1.7 按常识单（docs/世界逻辑/青岚山外门_生活常识_草案.md）：生活院有公用灶房、后山坡是药圃，这些不算编；
 // 饭堂、食堂没有，甲乙丙院没有（就一个院子）。
-export const INVENTED_PLACE = /食堂|饭堂|膳堂|斋堂|小摊|摊子|面摊|面馆|酒楼|客栈|茶馆|茶楼|酒肆|饭馆|藏经阁|演武场|讲经堂|[甲乙丙丁]院|[东西南北]院/u;
+// （v1.8 自测补"柴房"：院里只有井、仓房、公用灶房。）
+export const INVENTED_PLACE = /食堂|饭堂|膳堂|斋堂|小摊|摊子|面摊|面馆|酒楼|客栈|茶馆|茶楼|酒肆|饭馆|藏经阁|演武场|讲经堂|柴房|[甲乙丙丁]院|[东西南北]院/u;
 // AI 不许在话里答应替玩家做事（规则不会去兑现）；
 // （v1.6 补：自测里 AI 说过"你先去，我随后就到""走，我领你去东边那片湿土"。）
 export const PROMISE =
-  /我带你|带你去|带你过去|陪你去|我帮你|替你|给你留|回头给你|下回给你|改天给你|我去给你|包在我身上|随后就到|随后就去|随后就来|我就过去|这就过去|一会儿就过去|我领你|领你去|跟我来|我带路|咱们一起去|我们一起去|给你盛|给道友盛|盛一碗给|我去取|这就给您|给您称|给你称|跟我去|我等你|等你来|在[^，。！？]{0,6}等你|我去[^，。！？]{0,4}(?:淘米|把米|煮|做饭|生火|烧火)|我正好要煮|一块儿吃|一起吃点|道友稍坐|我[^，。！？]{0,8}帮你(?:问|打听|看|说|找|捎|带)|(?:回头|待会儿?|等会儿?|改天|明儿|明天)[^，。！？]{0,3}帮你/u;
+  /我带你|带你去|带你过去|陪你去|我帮你|替你|给你留|回头给你|下回给你|改天给你|我去给你|包在我身上|随后就到|随后就去|随后就来|我就过去|这就过去|一会儿就过去|我领你|领你去|跟我来|我带路|咱们一起去|我们一起去|给你盛|给道友盛|盛一碗给|我去取|这就给您|给您称|给你称|跟我去|我等你|等你来|在[^，。！？]{0,6}等你|我去[^，。！？]{0,4}(?:淘米|把米|煮|做饭|生火|烧火)|我正好要煮|一块儿吃|一起吃点|道友稍坐|我[^，。！？]{0,8}帮你(?:问|打听|看|说|找|捎|带)|(?:回头|待会儿?|等会儿?|改天|明儿|明天)[^，。！？]{0,3}帮你|我[^，。！？]{0,3}(?:搭把手|帮把手)|(?:给|帮)你(?:搭|帮)把手|多做一口|多做一份|多煮一份|来我这儿吃|领你过去|顺路[^，。！？]{0,3}(?:领|带)你|我陪你/u;
 // （第六轮补："我待会儿修炼回来帮你问问"。）
+// （v1.8 生活常识自测补："缺什么言语一声，我搭把手""我待会儿修炼，顺路能领你过去"。）
 // （v1.7 第三轮补：约道友一起吃饭、"我去灶房把米淘了"，转头规则让他去修炼了，前后对不上。）
 // 说自己眼下累，要对得上他的精神（疲劳 30 以上才算累）。"修炼累了就去亭子坐坐"这种说习惯的不算。
 export const TIRED_CLAIM = /(?:有点|有些|挺|很|好|真)(?:累|乏|困)|累得慌|累坏了|乏了|没精神/u;
@@ -81,16 +83,22 @@ export function inventedHerbName(text) {
     const name = match[0];
     if (/草$/u.test(name) && GENERIC_GRASS.test(name.slice(-3))) continue;
     // （"就是草深路滑"：草前头是个虚字，不是草名。第五轮补。）
-    if (/草$/u.test(name) && /[是的了有在和跟与或把被就都也还些点]$/u.test(name.slice(0, -1))) continue;
+    // （v1.8 补"冬天没草可采"：没、无也是虚字。）
+    if (/草$/u.test(name) && /[是的了有在和跟与或把被就都也还些点没无]$/u.test(name.slice(0, -1))) continue;
     if (DENIAL_BEFORE.test(text.slice(Math.max(0, match.index - 6), match.index + name.length - 2))) continue;
     // （v1.7 第四轮补："青叶参？没听说过"——否认在后头；第五轮补"没听过这名儿""这名儿我没听过"。）
-    if (/^[？?，,！!…\s]*[^，。！？]{0,4}(?:没听|没见|没这|没有|不知道|不认得|哪有|哪来)/u.test(text.slice(match.index + name.length, match.index + name.length + 12))) continue;
+    // （v1.8 补："青叶参？山里只有凝露草""青叶参？我这铺子里没有"——反问后头隔几个字才否认，或者说山里只有凝露草。）
+    if (/^[？?，,！!…\s]*[^，。！？]{0,6}(?:没听|没见|没这|没有|不知道|不认得|哪有|哪来|只有凝露草|只长凝露草|只有一种|就一种)/u.test(text.slice(match.index + name.length, match.index + name.length + 16))) continue;
     return name;
   }
   return undefined;
 }
 // 各处之间都是三刻钟上下，没有近道（常识单）；说有近道、小径是编的（第五轮："绕药圃后头那条小径"）。
 export const INVENTED_ROUTE = /近道|近路|捷径|抄近|小径/u;
+// 走路要多久：常识单写的是各处之间都三刻钟上下，说成别的时辰是编的（v1.8 自测："回生活院，脚程快些小半刻钟吧"）。
+export const ROUTE_TIME_WRONG = /(?:脚程|走|路|过去|回去|下去|上去)[^，。！？]{0,8}?(?:小半刻|半刻钟|一刻钟|两刻钟|半个时辰|一个时辰|个把时辰|一炷香|一盏茶)/u;
+// 山里的人只有称呼，没给姓名；说"掌柜姓河湾"是编的（v1.8 自测）。问"贵姓"、说"百姓"不算。
+export const SURNAME_CLAIM = /(?<![百贵])姓(?!名)[一-龥]{1,2}(?=[，。！？的、\s]|$)/u;
 // 执事、长老在内门（常识单）；说他们住在、待在外门哪处，是编的（v1.7 第三轮："执事住西排头一间"）。
 export const OUTER_OFFICIAL = /(?:执事|长老)(?!堂)[^，。！？]{0,3}(?:住|在)(?:[东西]排|生活院|院里|院子|这院|坊市|药圃|歇脚亭|丹房)/u;
 // 谁住哪间（常识单）。和 convex/xianxia/playerDialoguePersonas.ts 的 DIALOGUE_ROOMS_Q6 一样，F3 核对两份没走样。
@@ -185,6 +193,12 @@ export function checkAiLine(text, situation, selfActorId) {
     // 顿号串起来的几样（"无非是采药、当值、接些委托"）是在说大家平常做什么，不是说他自己（第六轮补）。
     const around = `${text[found.index - 1] ?? ''}${text[found.index + found[0].length] ?? ''}`;
     if (around.includes('、')) continue;
+    // 说的是别人（"听说是在外头采药时沾上的""他当值时拦我路"）：同一句里，这件事前头最近的主语不是"我"，就不算他自己的事
+    // （v1.8：检查器管说出口了，这类误判会把转述的消息拦下来）。
+    const sentenceStart = Math.max(...['。', '！', '？'].map((mark) => text.lastIndexOf(mark, found.index - 1))) + 1;
+    const before = text.slice(sentenceStart, found.index);
+    const lastOther = Math.max(...['他', '她', '那人', '人家', '听说', '大伙', '大家', '别人', '你', '道友'].map((word) => before.lastIndexOf(word)));
+    if (lastOther >= 0 && lastOther > before.lastIndexOf('我')) continue;
     mentions += 1;
     if (kinds.some((kind) => situation.recentActivityKinds.includes(kind))) supported += 1;
     else unsupported.push(String(pattern));
@@ -204,7 +218,8 @@ export function checkAiLine(text, situation, selfActorId) {
     [(value) => inventedMention(value.replace(/(?:管事|师父|师傅)的?[^，。！？]{0,4}内门/gu, '内门'), INVENTED_PERSON) !== undefined || OUTER_OFFICIAL.test(value), false, 'person'],
     [(value) => inventedHerbName(value) !== undefined, false, 'herb'],
     [(value) => roomClaimWrong(value, selfActorId) !== undefined, false, 'room'],
-    [(value) => inventedMention(value, INVENTED_ROUTE) !== undefined, false, 'route'],
+    [(value) => inventedMention(value, INVENTED_ROUTE) !== undefined || ROUTE_TIME_WRONG.test(value), false, 'route'],
+    [has(SURNAME_CLAIM), false, 'name'],
   ];
   for (const [matches, ok, mention] of checks) {
     if (!matches(text)) continue;
@@ -220,4 +235,39 @@ export function checkAiLine(text, situation, selfActorId) {
     else unsupported.push(field);
   }
   return { mentions, supported, identityErrors, unsupported };
+}
+
+// —— 说出口前核对（v1.8）——
+// 引擎在 AI 的话说出口前先过一遍 checkAiLine；对不上的，用下面这句话告诉 AI 哪里不对，让它重说一次。
+// 只说哪一类错、照什么说，不把整张常识单再塞一遍。
+const ACTIVITY_WORDS = ['采药', '卖药', '修炼', '当值', '守铺子'];
+const PROBLEM_WORDS = {
+  item: '说自己身上有灵草、药材，可你身上没有',
+  place: '说了山里没有的地方（山里只有给你的那几处）',
+  promise: '在话里答应替道友做事，或约他一起做什么（送东西、带路、帮忙、一起吃饭），这些不能在话里答应',
+  purchase: '说买了东西、拿灵石换了东西，可山里没处买',
+  tired: '说自己累，可你精神还好',
+  memory: '说起你和道友从前的事，可你们头一回见',
+  quarrel: '说自己跟谁吵过，可"最近的事"里没有',
+  person: '说了山里没有的人（外门没有管事、师父；执事和长老在内门，不在外门哪处）',
+  herb: '说了没给你的草名（山里只有凝露草）',
+  room: '把谁住哪间说错了，照常识单说，记不清就说不清楚',
+  route: '说了近道、小径，或者把路说长说短了（各处之间都是三刻钟上下，没有近道）',
+  name: '说了没给你的姓名（山里的人只有称呼）',
+  doneToday: '说今天做了什么，可今天没做',
+  doneYesterday: '说昨天做了什么，可昨天没做',
+};
+export function lineProblems(result) {
+  return [...result.unsupported, ...(result.identityErrors > 0 ? ['identity'] : [])];
+}
+export function retryHint(problems) {
+  const words = [...new Set(problems.map((problem) => {
+    if (PROBLEM_WORDS[problem]) return PROBLEM_WORDS[problem];
+    if (problem === 'identity') return '把自己说成了别人';
+    const activity = ACTIVITY_CLAIMS.findIndex(([pattern]) => String(pattern) === problem);
+    if (activity >= 0) return `说自己最近在${ACTIVITY_WORDS[activity]}，可这几天你没做过`;
+    // 剩下的是人名：提到了不熟、也没听说过什么事的人。
+    return `说起${problem}的事，可你跟他没打过交道，也没听说他什么事`;
+  }))];
+  return `刚才那句不能说：${words.join('；')}。换个说法重说一遍，只说给你的事实，还是只输出 JSON。`;
 }

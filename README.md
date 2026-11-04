@@ -122,7 +122,9 @@ file; it is never written to logs.
 - Player dialogue: rules decide whether a resident talks, for how long, when
   they leave, what they remember about you, and how their opinion of you
   changes. The language model only writes the lines, from the facts the rules
-  hand it, and a checker flags invented people, places, promises, and pasts.
+  hand it. Before a line is spoken, a checker looks for invented people,
+  places, routes, names, promises, and pasts; the model gets one retry, and a
+  rule line replaces it if the retry is still wrong.
 
 ## Measured, Not Assumed
 

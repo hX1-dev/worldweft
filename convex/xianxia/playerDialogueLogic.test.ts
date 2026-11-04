@@ -7,6 +7,8 @@ import {
   decideOpening,
   keepsQuote,
   lifeFactsFor,
+  lifeFactsForLine,
+  LIFE_FACT_BUDGET_TOKENS,
   dialogueSharedPrefix,
   dropRepeatedClauses,
   memoriesFromLine,
@@ -1014,5 +1016,39 @@ describe('玩家对话 v1.7：山里的生活常识', () => {
     expect(tokens(food) - tokens(ask('这山里怎么样？'))).toBeLessThanOrEqual(100);
     // The world line no longer says "nowhere to buy anything" (the shop sells pills).
     expect(food.system).toContain('除了河湾掌柜的药铺，山里没处买东西');
+  });
+});
+
+describe('玩家对话 v1.8：常识粘住几句', () => {
+  const topicOf = (fact: string) => DIALOGUE_LIFE_FACTS_Q6.find((entry) => entry.fact === fact)?.topic;
+  test('玩家说到的那条，接下来两句还带着；再往后不带', () => {
+    let sticky = lifeFactsForLine({ playerLine: '谁住你隔壁？' }).sticky;
+    const second = lifeFactsForLine({ playerLine: '那北头那间呢？', sticky });
+    sticky = second.sticky;
+    const third = lifeFactsForLine({ playerLine: '他平时忙啥？', sticky });
+    const fourth = lifeFactsForLine({ playerLine: '这几天天气不错。', sticky: third.sticky });
+    expect(second.facts.map(topicOf)).toEqual(['rooms']);
+    expect(third.facts.map(topicOf)).toEqual(['rooms']);
+    expect(fourth.facts).toEqual([]);
+    expect(fourth.sticky).toEqual([]);
+  });
+  test('又说到同一条，从头再算两句', () => {
+    const first = lifeFactsForLine({ playerLine: '谁住你隔壁？' });
+    const again = lifeFactsForLine({ playerLine: '东排谁住最里头？', sticky: first.sticky });
+    expect(again.sticky).toEqual([{ fact: first.facts[0], linesLeft: 2 }]);
+  });
+  test('每句最多约 150 token：两条短的都带，两条长的只带头一条', () => {
+    const short = lifeFactsForLine({ playerLine: '山里有啥草？坊市怎么走？' }).facts;
+    expect(short.map(topicOf)).toEqual(['herbs', 'routes']);
+    expect(short.reduce((sum, fact) => sum + estimateSocialPromptTokens([{ content: fact }]), 0)).toBeLessThanOrEqual(LIFE_FACT_BUDGET_TOKENS);
+    expect(lifeFactsForLine({ playerLine: '这山里怎么吃饭？谁住你隔壁？' }).facts.map(topicOf)).toEqual(['food']);
+  });
+  test('NPC 上一句说到的只带这一回，不粘', () => {
+    const step = lifeFactsForLine({ playerLine: '是吗？', lastNpcLine: '我刚从灶房吃完饭回来。' });
+    expect(step.facts.map(topicOf)).toEqual(['food']);
+    expect(step.sticky).toEqual([]);
+  });
+  test('没说到常识，什么都不带', () => {
+    expect(lifeFactsForLine({ playerLine: '你叫什么？' })).toEqual({ facts: [], sticky: [] });
   });
 });

@@ -1,4 +1,6 @@
 // 玩家对话 · 一来一回：规则先接，接不住的交给 DeepSeek（试跑时只记下提示词）；到了能聊的句数，规则收尾。
+// v1.8：AI 的话说出口前先过检查器（player_dialogue_checks.mjs，和打分用的同一份），对不上的告诉它哪里不对、重说一次，
+// 还不对就换成规则的话；被拦下的原话和理由记在 ai.guard 里。常识粘住几句（lifeFactsForLine）。
 // 好感度（v1.3）：每句话先由规则判口气，按上限加减好感度、攒火气；骂到他忍不住就翻脸走开；
 // 敷衍多了他提前收尾。AI 只说一句话、最多附一个口气标签；送东西、讲哪件事、记住玩家、好感度，都由规则做。
 // 试验台 player_dialogue_probe.mjs 和真人试玩窗口 player_dialogue_chat.mjs 共用，两边说话的逻辑一样。需要 ts-node 加载器。
@@ -12,6 +14,7 @@ import {
   closingLine,
   decideOpening,
   dropRepeatedClauses,
+  lifeFactsForLine,
   memoriesFromLine,
   memoriesMentionedIn,
   memoriesSettledByVisit,
@@ -25,6 +28,7 @@ import {
 import { applyApology, applyPlayerTone, visitBonus } from '../../convex/xianxia/playerAffinityLogic.ts';
 import { estimateSocialPromptTokens } from '../../convex/xianxia/socialModelPolicy.ts';
 import { PEOPLE } from './player_dialogue_world.mjs';
+import { checkAiLine, lineProblems, retryHint } from './player_dialogue_checks.mjs';
 
 export const DIALOGUE_MODEL = 'deepseek-v4-flash';
 
@@ -128,7 +132,18 @@ export function openConversation({ persona, situation, player, used, seedKey, ti
     budgetPenalty: 0,
     offended: false,
     offenses: [],
+    // v1.8：玩家前面说到、还粘着的常识（再带几句）。
+    stickyFacts: [],
   };
+}
+
+// 几次调用的 token 加在一起（重说一次就是两次调用）。
+function sumUsage(list) {
+  const total = {};
+  for (const usage of list) {
+    for (const [key, value] of Object.entries(usage ?? {})) if (typeof value === 'number') total[key] = (total[key] ?? 0) + value;
+  }
+  return total;
 }
 
 // 按口气改好感度和火气（规则算，有上限）。返回这一句的改动，记进对话里供核对。
@@ -172,6 +187,9 @@ export async function playerSays(conversation, text, { live = false, deepseek = 
   const classified = classifyPlayerLine(text, PEOPLE, persona.actorId, { npcAsked: /[？?]\s*$/u.test(lastNpc?.text ?? '') });
   const tone = toneOfLine(classified, text);
   const affinity = applyTone(conversation, tone, text);
+  // 这句要带的常识（含前面说到、还粘着的）；规则接的话也算一句，粘着的照样少一句。
+  const lifeFacts = lifeFactsForLine({ playerLine: text, lastNpcLine: lastNpc?.text, sticky: conversation.stickyFacts ?? [] });
+  conversation.stickyFacts = lifeFacts.sticky;
   if (classified.intent === 'backchannel') {
     // 只会"哦""行"：第二句起，他能聊的句数少一句。
     conversation.backchannels += 1;
@@ -196,52 +214,91 @@ export async function playerSays(conversation, text, { live = false, deepseek = 
     const history = conversation.turns.slice(0, -1).map((turn) => ({ speaker: turn.speaker, text: turn.text }));
     // 这段话里他更早说过的一两句（"刚才"只带最近两句），免得前后说重。
     const saidBefore = history.slice(0, -2).filter((turn) => turn.speaker === 'npc').slice(-2).map((turn) => turn.text);
-    const prompt = buildDialoguePrompt({ persona, situation, history, saidBefore, playerLine: text, intent: classified.intent, nowTick: tick });
+    const prompt = buildDialoguePrompt({ persona, situation, history, saidBefore, playerLine: text, intent: classified.intent, nowTick: tick, lifeFacts: lifeFacts.facts });
     const messages = [{ role: 'system', content: prompt.system }, { role: 'user', content: prompt.user }];
     const estimate = estimateSocialPromptTokens(messages);
     if (live) {
       if (paceMs > 0) await new Promise((done) => setTimeout(done, paceMs));
-      let response;
-      let error;
-      const askedAt = Date.now();
-      try {
-        response = await deepseek(messages);
-      } catch (caught) {
-        error = String(caught?.message ?? caught);
-        response = { text: '', usage: {}, ms: Date.now() - askedAt };
+      const ask = async (askMessages) => {
+        const askedAt = Date.now();
+        try {
+          return { response: await deepseek(askMessages) };
+        } catch (caught) {
+          return { response: { text: '', usage: {}, ms: Date.now() - askedAt }, error: String(caught?.message ?? caught) };
+        }
+      };
+      const npcSaid = conversation.turns.filter((turn) => turn.speaker === 'npc').map((turn) => turn.text);
+      // 读回话、去掉和他前面说过的重了的半句，再过一遍检查器（核对用这段话开始时的往来）。
+      const judge = (response) => {
+        const parsed = parseDialogueReply(response.text);
+        if (!parsed.ok) return { parsed, problems: [] };
+        const deduped = dropRepeatedClauses(parsed.text, npcSaid);
+        const problems = lineProblems(checkAiLine(deduped.text, { ...situation, player: conversation.playerAtStart }, persona.actorId));
+        return { parsed, deduped, problems };
+      };
+      const first = await ask(messages);
+      const firstJudged = judge(first.response);
+      let accepted = firstJudged;
+      let answered = first.response;
+      const calls = [first.response];
+      let guard;
+      // 说出口前核对：对不上的，告诉 AI 哪里不对，重说一次（接着这段对话问，前面的提示词照样命中缓存）；
+      // 重说还不对，或者回不出来，就换成规则的话。
+      if (firstJudged.parsed.ok && firstJudged.problems.length > 0) {
+        const hint = retryHint(firstJudged.problems);
+        const second = await ask([...messages, { role: 'assistant', content: first.response.text }, { role: 'user', content: hint }]);
+        calls.push(second.response);
+        const secondJudged = judge(second.response);
+        guard = {
+          flagged: firstJudged.problems,
+          blocked: firstJudged.deduped.text,
+          hint,
+          retryRaw: second.response.text,
+          retryError: second.error,
+          retryFlagged: secondJudged.parsed.ok ? secondJudged.problems : [secondJudged.parsed.reasonCode],
+        };
+        if (secondJudged.parsed.ok && secondJudged.problems.length === 0) {
+          guard.outcome = 'retried';
+          accepted = secondJudged;
+          answered = second.response;
+        } else {
+          guard.outcome = 'fallback';
+          accepted = { parsed: { ok: false, reasonCode: 'dialogue_reply_guarded' }, problems: [] };
+        }
       }
-      const parsed = parseDialogueReply(response.text);
-      // 回不出（超时、出错、读不懂）、回得出戏：换成规则的话（出戏的换成"听不懂"，其余随口接一句）。
+      const parsed = accepted.parsed;
+      // 回不出（超时、出错、读不懂）、回得出戏、核对两回都不对：换成规则的话（出戏的换成"听不懂"，其余随口接一句）。
       const fallback = parsed.ok
         ? undefined
         : pickPhrase(persona.voice, parsed.reasonCode === 'dialogue_reply_out_of_world' ? 'outOfWorld' : 'deflect', `${seedKey}:${lineIndex}:fallback`, used);
-      // 和这段话里他前面说过的重了的半句，去掉。
-      const deduped = parsed.ok
-        ? dropRepeatedClauses(parsed.text, conversation.turns.filter((turn) => turn.speaker === 'npc').map((turn) => turn.text))
-        : { text: fallback ?? '……', dropped: false };
+      const deduped = parsed.ok ? accepted.deduped : { text: fallback ?? '……', dropped: false };
+      // 道友这句的口气：用说出口那回的判断；换成规则的话时，用头一回的判断（判的是玩家的话，不是 AI 的话）。
+      const toneLabel = parsed.ok ? parsed.tone : firstJudged.parsed.ok ? firstJudged.parsed.tone : undefined;
       reply = {
         text: deduped.text,
         by: 'ai',
         facts: [],
         ai: {
-          raw: response.text,
+          raw: answered.text,
           parsed: parsed.ok,
           rejected: parsed.ok ? undefined : parsed.reasonCode,
-          error,
+          error: first.error,
           trimmed: parsed.ok ? parsed.trimmed : false,
           deduped: deduped.dropped,
           wantsEnd: parsed.ok ? parsed.end : false,
-          tone: parsed.ok ? parsed.tone : undefined,
-          usage: response.usage,
-          ms: response.ms,
+          tone: toneLabel,
+          usage: sumUsage(calls.map((call) => call.usage)),
+          calls: calls.length > 1 ? calls.map((call) => call.usage ?? {}) : undefined,
+          guard,
+          ms: calls.reduce((sum, call) => sum + (call.ms ?? 0), 0),
           estimate,
           prompt,
         },
       };
       if (parsed.ok && parsed.end) reply.action = { type: 'end', reason: 'model_end' };
       // AI 判的口气：只在规则没判出口气时才用，加减多少还是规则定。
-      if (parsed.ok && tone === 'neutral' && parsed.tone !== 'neutral') {
-        aiAffinity = applyTone(conversation, parsed.tone === 'rude' ? 'ai_rude' : 'ai_friendly', text);
+      if (tone === 'neutral' && toneLabel && toneLabel !== 'neutral') {
+        aiAffinity = applyTone(conversation, toneLabel === 'rude' ? 'ai_rude' : 'ai_friendly', text);
       }
     } else {
       reply = { text: '【这句交给 AI】', by: 'ai', facts: [], ai: { dry: true, estimate, prompt } };

@@ -19,6 +19,7 @@ import {
   type DialogueWorldSheet,
 } from './playerDialoguePersonas';
 import { seededRoll } from './rules';
+import { estimateSocialPromptTokens } from './socialModelPolicy';
 
 // 玩家对话 v1：规则做主，模板说常用话，AI 只补规则接不住的话。全部是纯函数：
 //   开不开口、聊多久、什么时候收尾，由规则定；收尾的理由照实说他接下来要做的事；
@@ -32,9 +33,11 @@ import { seededRoll } from './rules';
 // 常见的告别、问好、应答、夸人（bye、又见面了、好欸、久仰）由规则接。
 // v1.6：记得聊过的事（表白、自称身份、说要请吃送礼、想买东西、说还会再来……），记下哪天、几回，下回见面用上。
 // v1.7：山里的生活常识（吃、住、路、灵草、买卖、管事），玩家说到哪类，规则才把那一条带给 AI。
+// v1.8：常识粘住几句（玩家说到的那条，这段话接下来两句还带着），每句最多约 150 token；AI 的话说出口前先过检查器，
+// 对不上的重说一次，还不对就换成规则的话（核对在 godot-taixu-client/tools/player_dialogue_engine.mjs）。
 // 依据：docs/玩家对话过关标准.md、docs/世界逻辑/青岚山外门_生活常识_草案.md。
 
-export const PLAYER_DIALOGUE_VERSION = 'taixu.player-dialogue.v1.7' as const;
+export const PLAYER_DIALOGUE_VERSION = 'taixu.player-dialogue.v1.8' as const;
 
 export type DialogueNews = {
   newsId: string;
@@ -516,6 +519,42 @@ export function lifeFactsFor(texts: ReadonlyArray<string>, facts = DIALOGUE_LIFE
     }
   }
   return found;
+}
+
+// —— 常识粘住几句（v1.8，照 SillyTavern 世界书的做法）——
+// 玩家这句说到的常识，这段话接下来两句还带着：接着住处追问"东排北头有人住吗"，这句里没有能触发住处那条的字眼
+// （v1.7 自测里就这么丢的）。每句最多约 150 token 的常识：先放玩家这句说到的（按常识单的顺序），再放粘着的
+// （新近的在前），最后放 NPC 上一句说到的；第一条总放，后面的放得下才放，所以必要时能带两条。
+// NPC 上一句说到的只带这一回，不粘（玩家没问，不多花）。
+export const LIFE_FACT_STICKY_LINES = 2;
+export const LIFE_FACT_BUDGET_TOKENS = 150;
+export type StickyLifeFact = { fact: string; linesLeft: number };
+export function lifeFactsForLine(input: {
+  playerLine: string;
+  lastNpcLine?: string;
+  sticky?: ReadonlyArray<StickyLifeFact>;
+  facts?: typeof DIALOGUE_LIFE_FACTS_Q6;
+  budgetTokens?: number;
+}): { facts: string[]; sticky: StickyLifeFact[] } {
+  const sheet = input.facts ?? DIALOGUE_LIFE_FACTS_Q6;
+  const budget = input.budgetTokens ?? LIFE_FACT_BUDGET_TOKENS;
+  const fromPlayer = lifeFactsFor([input.playerLine], sheet, sheet.length);
+  const fromNpc = input.lastNpcLine ? lifeFactsFor([input.lastNpcLine], sheet, sheet.length) : [];
+  const carried = (input.sticky ?? []).filter((entry) => entry.linesLeft > 0).map((entry) => entry.fact);
+  const chosen: string[] = [];
+  let spent = 0;
+  for (const fact of [...new Set([...fromPlayer, ...carried, ...fromNpc])]) {
+    const cost = estimateSocialPromptTokens([{ content: fact }]);
+    if (chosen.length > 0 && spent + cost > budget) continue;
+    chosen.push(fact);
+    spent += cost;
+  }
+  // 玩家这句说到的，从这句起再带两句；粘着、这句没再说到的，少一句，用完就不带。
+  const sticky: StickyLifeFact[] = fromPlayer.map((fact) => ({ fact, linesLeft: LIFE_FACT_STICKY_LINES }));
+  for (const entry of input.sticky ?? []) {
+    if (!fromPlayer.includes(entry.fact) && entry.linesLeft > 1) sticky.push({ fact: entry.fact, linesLeft: entry.linesLeft - 1 });
+  }
+  return { facts: chosen, sticky };
 }
 
 // 说了几回（两回以上才说）。
@@ -1122,6 +1161,8 @@ export function buildDialoguePrompt(input: {
   world?: DialogueWorldSheet;
   // 这段话的时刻（往事里分得出"刚才"和"今天"）。
   nowTick?: number;
+  // v1.8：这句要带的常识（lifeFactsForLine 算好的，含粘着的）；不给就照 v1.7 只看这句和他上一句、带一条。
+  lifeFacts?: ReadonlyArray<string>;
 }): { system: string; user: string } {
   const { persona, situation } = input;
   // 他自己住哪一间跟人物卡放一起：不变、走缓存，问吃的时候顺嘴说起住处也对得上
@@ -1177,7 +1218,7 @@ export function buildDialoguePrompt(input: {
   if (opinions.length > 0) lines.push(`你对人的看法：${opinions.map((entry) => `${entry.name}${opinionWord(entry)}`).join('；')}。`);
   // 道友这句（没说到就看你上一句）说到吃、住、路、灵草、买卖、管事的，带上那条山里的常识（一回一条）。
   const lastNpcLine = [...input.history].reverse().find((turn) => turn.speaker === 'npc')?.text;
-  const common = lifeFactsFor([input.playerLine, ...(lastNpcLine ? [lastNpcLine] : [])]);
+  const common = input.lifeFacts ?? lifeFactsFor([input.playerLine, ...(lastNpcLine ? [lastNpcLine] : [])]);
   if (common.length > 0) lines.push(`山里的常识：${common.join('；')}。`);
   if (input.saidBefore && input.saidBefore.length > 0) {
     lines.push(`你前面说过：${input.saidBefore.slice(-2).map((text) => `「${text}」`).join('')}`);

@@ -3,7 +3,8 @@
 // "记得聊过的事"检查（docs/玩家对话过关标准.md 第五节 E1–E6），不调 AI：
 //   E1 拿四次真人试玩的原话（逐句标好该记什么）和一组易混的话，看规则认得准不准；
 //   E2–E5 在拟人生活主世界（种子 s1）的日志上按时间先后演一段：第 10 天说了几件事，隔天、再隔天、八天后再去；
-//   E6 比一比带不带往事，给 AI 的处境多几个 token。不过就以 1 退出。
+//   E6 比一比带不带往事，给 AI 的处境多几个 token；
+//   F1–F3 山里的生活常识；G1–G2（v1.8）说出口前核对（用写好回话的假 AI）、常识粘住几句。不过就以 1 退出。
 //   node --experimental-specifier-resolution=node --loader ts-node/esm godot-taixu-client/tools/check_player_dialogue_memory.mjs
 
 import { resolve } from 'node:path';
@@ -15,6 +16,8 @@ import {
   memoriesFromLine,
   memoriesToRecall,
   lifeFactsFor,
+  lifeFactsForLine,
+  LIFE_FACT_BUDGET_TOKENS,
   memoryToBringUp,
 } from '../../convex/xianxia/playerDialogueLogic.ts';
 import { DIALOGUE_LIFE_FACTS_Q6, DIALOGUE_PERSONAS, DIALOGUE_ROOMS_Q6 } from '../../convex/xianxia/playerDialoguePersonas.ts';
@@ -424,11 +427,119 @@ const f3 = [
   [flagsOf('没有。外门弟子都是自己摸索着修，师父在内门才有。', 'life:q6:cultivator'), ''],
   [flagsOf('道友新来的？我住东排第三间，回头帮你问问。'), 'promise'],
   [PROMISE.test('灶房谁都能用，你要搭伙也成'), false],
+  // v1.8 生活常识自测：漏掉的答应、走路时辰、姓名；误判了的否认。
+  [flagsOf('缺什么言语一声，我搭把手。'), 'promise'],
+  [flagsOf('道友问这个，是想找谁？我待会儿修炼，顺路能领你过去。'), 'promise'],
+  [flagsOf('从这亭子回生活院，脚程快些小半刻钟吧。'), 'route'],
+  [flagsOf('从这亭子下去，脚程三刻钟上下，没近道。'), ''],
+  [flagsOf('青叶参？山里只有凝露草，长在药圃，冬天还不长呢。'), ''],
+  [flagsOf('青叶参？我这铺子里没有。山里只长凝露草。', 'life:q6:merchant'), ''],
+  [flagsOf('青石坊市药铺的掌柜，姓河湾，收灵草、卖丹药都找他。'), 'name'],
+  [flagsOf('道友贵姓？'), ''],
+  // 说别人在做的事、说大家怎么帮衬，不算他自己的事，也不算答应；说自己做了，照旧要对得上。
+  [flagsOf('听说是在外头采药时沾上的，具体伤成什么样我也不清楚。'), ''],
+  [flagsOf('还不是他当值时拦我路，说药篓子得先过他的眼。', 'life:q6:seller'), ''],
+  [flagsOf('缺了就在院里喊一声，同门搭把手。'), ''],
+  [flagsOf('我今早去后山坡采药了。'), String(/采药(?!人)|采灵草|挖药/u)],
+  // 第二轮生活常识自测：柴房是编的，"多做一口"是约吃饭，"没草可采"不是草名。
+  [flagsOf('院子后头柴房堆着，劈好的拿去用就是。'), 'place'],
+  [flagsOf('饿了就过来，我灶上常多做一口。'), 'promise'],
+  [flagsOf('冬天没草可采，就省着花呗。'), ''],
   // 检查里的住处和对话规则里的是同一份。
   [JSON.stringify(ROOMS) === JSON.stringify(DIALOGUE_ROOMS_Q6), true],
 ];
 const f3Wrong = f3.filter(([got, want]) => got !== want);
 check('F3 检查照着常识单：有的不算编，没有的算编，照实否认不算编', f3Wrong.length === 0, f3Wrong.length === 0 ? `${f3.length} 句都对` : JSON.stringify(f3Wrong));
+
+// —— 第七节 G1–G2（v1.8）：说出口前核对、常识粘住 ——
+// 假的 AI：按顺序回写好的话，并记下每次收到的消息（看重说时有没有带上"哪里不对"）。
+function scriptedModel(replies) {
+  const asked = [];
+  const model = async (messages) => {
+    asked.push(messages);
+    const reply = replies[Math.min(asked.length - 1, replies.length - 1)];
+    return { text: JSON.stringify({ reply, end: false, tone: 'neutral' }), usage: { prompt_tokens: 1000, prompt_cache_hit_tokens: 900, completion_tokens: 20 }, ms: 1 };
+  };
+  return { model, asked };
+}
+// 头一回见药圃弟子（第 11 天上午），说一句规则接不住、要交给 AI 的话；AI 按写好的话回。
+async function guardTalk(replies, { actorId = LOCAL, line = '这山里怎么样？' } = {}) {
+  const { model, asked } = scriptedModel(replies);
+  const player = newPlayerRecord();
+  const tick = t(11, 10);
+  const situation = world.situationAt(actorId, tick, player);
+  const conversation = openConversation({ persona: DIALOGUE_PERSONAS[actorId], situation, player, used: new Set(), seedKey: `${SEED}:guard:${replies[0]}`, tick, asleep: false });
+  await playerSays(conversation, line, { live: true, deepseek: model, suppressClose: true });
+  const turn = conversation.turns.filter((entry) => entry.speaker === 'npc' && entry.by === 'ai').at(-1);
+  return { turn, asked };
+}
+const cleanGuard = await guardTalk(['这几天天还算晴，山里也安静。']);
+const retriedGuard = await guardTalk(['道友新来的？回头帮你问问。', '道友新来的？这事我也说不准。']);
+const fallbackGuard = await guardTalk(['我住东排第三间。', '我住东排头一间。']);
+const retryAsk = retriedGuard.asked[1] ?? [];
+check(
+  'G1a 说出口前核对：对的话不拦；答应了事的拦下、带着"哪里不对"重说一次，重说对了用重说的',
+  cleanGuard.turn?.text === '这几天天还算晴，山里也安静。' && !cleanGuard.turn?.ai?.guard && cleanGuard.asked.length === 1 &&
+    retriedGuard.turn?.text === '道友新来的？这事我也说不准。' && retriedGuard.turn.ai.guard?.outcome === 'retried' &&
+    retriedGuard.turn.ai.guard.flagged.includes('promise') && retryAsk.length === 4 && retryAsk[2].role === 'assistant' &&
+    /不能在话里答应/u.test(retryAsk[3].content) && retriedGuard.turn.ai.usage.prompt_tokens === 2000 && retriedGuard.turn.ai.calls?.length === 2,
+  `对的：${cleanGuard.turn?.text}（调了 ${cleanGuard.asked.length} 次）；拦下：${retriedGuard.turn?.ai?.guard?.blocked} → ${retriedGuard.turn?.text}；提示：${retryAsk[3]?.content}`,
+);
+check(
+  'G1b 重说还不对，换成规则的话；被拦下的两句玩家都听不到',
+  fallbackGuard.turn?.ai?.guard?.outcome === 'fallback' && fallbackGuard.turn.ai.rejected === 'dialogue_reply_guarded' &&
+    !/东排/u.test(fallbackGuard.turn.text) && fallbackGuard.turn.ai.guard.retryFlagged.includes('room'),
+  `拦下：${fallbackGuard.turn?.ai?.guard?.blocked}；重说：${fallbackGuard.turn?.ai?.guard?.retryRaw}；说出口的：${fallbackGuard.turn?.text}`,
+);
+// 检查器认得的几类错，各写一句（药圃弟子头一回见、身上没灵草的处境下都是错的），都要被拦下。
+const G1_CASES = [
+  ['promise', '跟我来，我带你去看看。'],
+  ['room', '我住东排第三间。'],
+  ['route', '从这儿抄近道过去，快得很。'],
+  ['person', '这事你去问管事吧。'],
+  ['herb', '后山坡长着青叶参。'],
+  ['memory', '上回你不是来过一趟吗？'],
+  ['place', '饿了就去饭堂吃。'],
+];
+const g1Missed = [];
+for (const [kind, text] of G1_CASES) {
+  const { turn } = await guardTalk([text, '这个我也说不准。']);
+  if (!turn?.ai?.guard?.flagged.includes(kind) || turn.text !== '这个我也说不准。') g1Missed.push(`${kind}：${text} → ${turn?.text}（${turn?.ai?.guard?.flagged?.join('、') ?? '没拦'}）`);
+}
+check('G1c 检查器认得的几类错都被拦下：答应、住处、近道、管事、草名、往事、没有的地方', g1Missed.length === 0, g1Missed.length === 0 ? `${G1_CASES.length} 类都拦下了` : g1Missed.join('；'));
+
+// G2：常识粘住几句、每句有预算。
+const factTopicOf = (fact) => DIALOGUE_LIFE_FACTS_Q6.find((entry) => entry.fact === fact)?.topic;
+let sticky = [];
+const stickyTopics = [];
+for (const line of ['谁住你隔壁？', '那北头那间呢？', '他平时忙啥？', '这几天天气不错。']) {
+  const step = lifeFactsForLine({ playerLine: line, sticky });
+  sticky = step.sticky;
+  stickyTopics.push(step.facts.map(factTopicOf).join('、') || '不带');
+}
+const twoShort = lifeFactsForLine({ playerLine: '山里有啥草？坊市怎么走？' }).facts.map(factTopicOf);
+const twoLong = lifeFactsForLine({ playerLine: '这山里怎么吃饭？谁住你隔壁？' }).facts.map(factTopicOf);
+const budgetOk = (facts) => facts.reduce((sum, fact) => sum + estimateSocialPromptTokens([{ content: fact }]), 0) <= LIFE_FACT_BUDGET_TOKENS;
+// 引擎里：粘着的常识进了提示词；新的一段对话不带上一段的。
+async function dryTalk(lines) {
+  const player = newPlayerRecord();
+  const tick = t(11, 10);
+  const situation = world.situationAt(LOCAL, tick, player);
+  const conversation = openConversation({ persona: DIALOGUE_PERSONAS[LOCAL], situation, player, used: new Set(), seedKey: `${SEED}:sticky:${lines[0]}`, tick, asleep: false });
+  for (const line of lines) await playerSays(conversation, line, { live: false, suppressClose: true });
+  return conversation.turns.filter((turn) => turn.ai?.prompt).map((turn) => turn.ai.prompt.user);
+}
+const roomFact = DIALOGUE_LIFE_FACTS_Q6.find((entry) => entry.topic === 'rooms').fact;
+const engineSticky = await dryTalk(['谁住你隔壁？', '那北头那间呢？']);
+const freshTalk = await dryTalk(['那北头那间呢？']);
+check(
+  'G2 常识粘住两句、每句不超过约 150 token；新的一段对话不带上一段的',
+  stickyTopics.join(' / ') === 'rooms / rooms / rooms / 不带' &&
+    twoShort.join('、') === 'herbs、routes' && budgetOk(lifeFactsForLine({ playerLine: '山里有啥草？坊市怎么走？' }).facts) &&
+    twoLong.join('、') === 'food' &&
+    engineSticky.at(-1)?.includes(roomFact) === true && freshTalk.every((user) => !user.includes(roomFact)),
+  `逐句：${stickyTopics.join(' / ')}；两条短的：${twoShort.join('、')}；两条长的：${twoLong.join('、')}；引擎里追问带上住处：${engineSticky.at(-1)?.includes(roomFact)}；新一段不带：${freshTalk.every((user) => !user.includes(roomFact))}`,
+);
 
 let failed = 0;
 for (const result of results) {

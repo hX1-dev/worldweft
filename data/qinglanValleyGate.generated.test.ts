@@ -145,7 +145,9 @@ describe('qinglan_valley_gate Convex 可导入生成数据', () => {
       { cwd: root, stdio: 'pipe' },
     );
 
-    expect(readFileSync(generatedPath, 'utf8')).toBe(generatedBefore);
+    // 只比内容，不比换行：Windows 上 git 检出时可能换成 CRLF，生成脚本写的是 LF。
+    const lf = (text: string) => text.replace(/\r\n/g, '\n');
+    expect(lf(readFileSync(generatedPath, 'utf8'))).toBe(lf(generatedBefore));
     for (const fileName of sourceFileNames) {
       expect(readFileSync(resolve(sourceDir, fileName), 'utf8')).toBe(sourceBefore[fileName]);
     }
