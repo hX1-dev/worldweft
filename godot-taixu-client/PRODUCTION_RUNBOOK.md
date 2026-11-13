@@ -2,6 +2,10 @@
 
 Last reviewed: 2026-07-10.
 
+This is a procedure reference with historical gate evidence. Current public
+capabilities are tracked in [Implementation status](../docs/STATUS.md); refresh
+release evidence against the intended commit and deployment.
+
 This runbook owns release and incident procedures for the Convex xianxia
 backend plus the new Godot Taixu client. It does not include the old Web/Pixi
 client, old Godot prototypes, external engine source, or map-production tools.
@@ -97,8 +101,8 @@ Run from the repository root:
 npm run godot:check-production
 ```
 
-The gate intentionally fails unless the real repository contains one clean,
-committed 161-file release unit. It then runs:
+The gate intentionally fails unless the real repository contains the clean,
+committed release-source unit defined by the source-boundary tooling. It then runs:
 
 1. real-worktree release-source gate;
 2. full-local isolated snapshot with codegen stability, strict static checks,

@@ -1,126 +1,249 @@
-# Worldweft Architecture
+# Architecture
 
-![Worldweft authority architecture](docs/architecture.svg)
+Worldweft separates **intent**, **world consequences**, and **presentation**.
+This guide describes the implemented runtime first, the separate life/dialogue
+labs next, and the proposed cross-player extension last. Current capability
+labels and source evidence are maintained in [Implementation status](docs/STATUS.md).
 
-## Non-Negotiable Authority Rules
+## System Overview
 
-1. **Convex is the durable authority.** It validates requests, applies rules,
-   and owns `actionRecords`, `worldEvents`, relationships, memories, and world
-   state.
-2. **Godot is embodied but non-authoritative.** It owns space, collision,
-   input, and presentation. It submits semantic requests and renders returned
-   projections.
-3. **Agents and LLMs are proposers.** They may supply intent, polish display
-   text, or speak dialogue lines. They cannot write durable state or determine
-   a canonical outcome.
-4. **Every durable outcome has evidence.** A completed action is traceable
-   through the action record and any resulting world event.
+![Worldweft runtime: Godot and NPC turns submit actions to Convex; durable facts feed viewer-safe state and history](docs/architecture.svg)
 
-## Command Lifecycle
+| Owner | Owns | Boundary |
+| --- | --- | --- |
+| Godot client | Input, movement, collision, animation, UI | Submits semantic actions and renders read models. |
+| NPC decision layer | Observation, candidates, goals, proposed intent | Uses the same formal action pipeline as player intent. |
+| Convex rule layer | Validation, adjudication, durable changes | Final authority over what becomes a world fact. |
+| Read model and history | Permitted state, result summaries, linked traces | Player visibility is distinct from debug visibility. |
+| Optional model | Constrained intent or dialogue text | Model output must pass the relevant rule and validation boundaries. |
 
-```text
-Godot or agent intent
-        |
-        v
-Authenticated bridge request
-        |
-        v
-Validate: identity, presence, capability, idempotency, prerequisites, risk
-        |
-        v
-Adjudicate canonical rules
-        |
-        v
-Persist actionRecord, worldEvent, relationship/memory and world-state changes
-        |
-        v
-Build Godot read model and presentation fields
-        |
-        v
-Godot renders the returned projection and replay trace
+A model saying that a gift was given is not an inventory transfer. The formal
+`gift` action must be accepted and settled by the world rules. The same
+principle applies to relationships, memories, and events.
+
+## Action Lifecycle
+
+```mermaid
+sequenceDiagram
+    participant C as Godot / NPC
+    participant B as Bridge
+    participant R as World rules
+    participant D as World state
+    participant V as Read model
+    C->>B: Action and stable ID
+    B->>B: Bind world, actor, scope
+    B->>R: Prepare allowed intent
+    R->>R: Check current rules
+    R->>R: Resolve retry and outcome
+    R->>D: Commit effects and trace
+    D-->>V: Permitted facts and trace
+    V-->>C: Result and presentation
 ```
 
-Godot submits requests such as `talk`, `gift`, `trade`, `spar`,
+1. **Authenticate and bind.** Bridge credentials bind the configured world,
+   actor, and scopes; a client cannot select another actor merely by naming it.
+2. **Prepare intent.** The bridge reads context and capabilities. Preparation
+   is read-only, and does not reserve a successful outcome.
+3. **Adjudicate again at settlement.** Final mutation checks use current
+   spatial and rule facts, so an earlier preparation cannot authorize a stale
+   action.
+4. **Persist the outcome.** The result is recorded; accepted actions apply
+   their state effects and link the applicable event and history records.
+   A rejected request does not receive successful effects.
+5. **Return a read model.** The caller receives authoritative results and
+   optional display fields, within the viewer's visibility rules.
+
+`clientActionId` identifies a client command across retries. An exact retry
+returns its original lifecycle. Reusing a key with different semantics is a
+conflict rather than a second application of the action.
+
+The reference action vocabulary includes `talk`, `gift`, `trade`, `spar`,
 `request_teaching`, `cultivate`, `breakthrough`, `arrive`, and `explore`.
-It does not submit an authored outcome. Convex decides whether each request is
-legal and records the resulting facts.
+Domain rules live behind the stable
+[`actions.ts`](convex/xianxia/actions.ts) facade and its
+[`actionRouter.ts`](convex/xianxia/domains/actionRouter.ts) implementation.
 
-## Read And Presentation Model
+## Autonomous NPC Ticks
 
-The bridge returns a rule-owned `summary` together with presentation fields:
-`bubbleText`, `displayText`, `bubbleKind`, and `presentationSource`.
+```mermaid
+flowchart TD
+    Trigger["Debug request or enabled cron"] --> Lease["Acquire tick lease"]
+    Lease --> Systems["Advance lifecycle and enabled world systems"]
+    Systems --> Schedule["Reserve a bounded set of eligible residents"]
+    Schedule --> Observe["Build each resident's current context"]
+    Observe --> Choose["Choose intent: rules-first default"]
+    Choose --> Action["Submit through the formal action pipeline"]
+    Action --> Facts["Persist consequences and decision trace"]
+    Facts --> Release["Release tick lease"]
+```
 
-This separation is a boundary, not decoration. A future LLM polish layer may
-alter optional display language, but cannot rewrite the durable summary,
-result code, action record, or world event. The `presentationSource` field
-keeps that provenance visible to clients and debuggers.
+The [scheduler](convex/xianxia/agentTickScheduler.ts) uses world/map indexes and
+persisted cursors. It scans bounded pages, excludes player-controlled or
+ineligible actors, and reserves at most eight residents for a turn. Selection
+advances through the population rather than processing every NPC on every tick.
 
-`/godot/tick` may return a durable event or a `tickOnly` observation. A tick
-that does not change durable state must not invent a world event simply to make
-the client look active.
+The [tick orchestrator](convex/xianxia/runtime/scheduler/agentTick.ts) advances
+lifecycle, social timing, enabled world systems, and selected actors. The
+[decision path](convex/xianxia/runtime/decision/proposeAndAct.ts) builds intent
+from current context, survival needs, ongoing activity, goals, and candidates.
+Ordinary autonomous choice is rule-driven by default. Optional model routes
+exist behind deployment and provider-policy gates.
 
-## Public Bridge Surface
+This scheduler is **map-scoped, not player-radius activation**. Switching
+nearby residents to model-driven decisions and distant residents to cheaper
+routines remains a planned integration. Rules-first turns already reduce the
+need for model calls, but they are not proof of that distance-based handoff.
 
-The authenticated bridge lives in `convex/http.ts` and the `convex/godot*.ts`
-modules.
+### Runtime Switches
 
-| Endpoint | Responsibility |
+| Switch | Current behavior |
 | --- | --- |
-| `/godot/worldState` | Load world-wide read state. |
-| `/godot/regionState` | Load spatial and regional projection data. |
-| `/godot/capabilities` | Return currently legal semantic actions. |
-| `/godot/action` | Validate, adjudicate, persist, and return an action result. |
-| `/godot/tick` | Advance scheduled activity and return durable or tick-only observation. |
-| `/godot/actorContext` | Load agent-facing context without granting write authority. |
-| `/godot/actionRecord` | Read an authoritative action trace. |
-| `/godot/movementGoals` | List movement the runtime wants Godot to walk out. |
-| `/godot/movementReport` | Report where a body arrived; Convex decides what the arrival means. |
-| `/godot/actionExecutionGoals` | List timed actions the runtime wants Godot to play out. |
-| `/godot/actionExecutionReport` | Report a played-out action; Convex settles the result. |
+| `autoTickEnabled` and `XIANXIA_AUTO_TICK=1` | Both are required for cron-driven turns. Missing world configuration is off; `seedDemo` enables the world switch when creating a new configuration. |
+| `autonomousGrowthEnabled` | Separate background growth system; defaults off. |
+| `worldDirectorEnabled` | Bounded environment-pressure system; defaults off. The current pressure is herb miasma with resource-refresh effects and expiry. |
+| `XIANXIA_AGENT_LLM_ENABLED=1` | Enables an optional autonomous model route; absent means off. |
+| Social-model deployment gates | Separate authorization, prompt, budget, concurrency, timeout, and retry controls apply to optional social calls. |
+| `humanLifeV1` | Richer resident-life rules used by the offline simulation; not enabled in the live context path. |
 
-Legacy arrive/interact endpoints are compatibility adapters. They enter the
-same formal pipeline and cannot create standalone events.
+See [configuration](convex/xianxia/config.ts),
+[scheduler policy](convex/xianxia/agentTickSchedulerPolicy.ts), and
+[social-model policy](convex/xianxia/socialModelPolicy.ts) for exact gates.
+The world does not automatically keep advancing simply because a client closes;
+background progression depends on the configured runtime and enabled ticks.
 
-## Decision And Dialogue Layers
+## Life And Dialogue Labs
 
-**Per-tick choice is rules-only.** Each tick, every reserved resident runs
-`proposeAndAct`: the runtime builds the legal candidates, rules rank them, and
-the winner goes through the same action pipeline as a player's request. A
-paired A/B against DeepSeek showed no gain from letting a model pick, so the
-model is kept out of this loop (`docs/ab-rules-vs-deepseek-2026-10-21.md`).
+The richer life simulation and player dialogue are executable tools with
+separate state paths. Connecting them to the live Godot tick is pending.
 
-**Life rules are opt-in.** `humanLifeV1` adds sleep, daily focus, leisure,
-gifts and debts, quarrels, grudges, apologies, rumours, and reputation
-(`humanLifeLogic.ts`, `humanSocietyLogic.ts`). The offline simulation turns it
-on; the live tick does not yet. Changing anything shared must keep the 15
-baseline trajectory digests (`npm run life:check-baseline`).
+```mermaid
+flowchart TD
+    Simulation["Offline rules and humanLifeV1"] --> Log["Seeded resident-life log"]
+    Log --> Situation["Resident situation and known facts"]
+    Player["Player line in local dialogue lab"] --> Dialogue["Conversation, memory, and affinity rules"]
+    Situation --> Dialogue
+    Dialogue --> Rule["Rule reply when available"]
+    Dialogue --> Model["Optional model-generated line"]
+    Model --> Check["Check facts and persona constraints"]
+    Check -->|Flagged| Retry["One retry, then rule fallback if still invalid"]
+    Rule --> Session["Local conversation and session log"]
+    Check -->|Valid| Session
+    Retry --> Session
+```
 
-**Dialogue is rule-led.** `playerDialogueLogic.ts` classifies what the player
-said, decides whether the resident opens, how many lines they give, when they
-leave, what they remember, and how affinity moves (`playerAffinityLogic.ts`).
-The model receives a persona card, a fact sheet, and the situation, and writes
-one line at a time. It cannot change affinity, memory, or world facts. Each
-line goes through the checker in
-`godot-taixu-client/tools/player_dialogue_checks.mjs` before it is spoken; a
-line that invents people, places, routes, names, promises, or pasts is sent
-back once with the reason, and replaced by a rule line if the retry is still
-wrong. Facts the player asked about stay in the prompt for the next two lines.
+**Resident life.** `humanLifeV1` adds sleep windows, daily focus, leisure,
+outings, social chemistry, gifts, debts, quarrels, apologies, rumours, and
+reputation. The simulation is compared against 15 fixed trajectory digests.
+The full baseline and CI's five-case quick subset are different checks.
 
-## Reference-World Boundary
+**Conversation.** The local tool reads resident situations from a simulation
+log. Rules decide whether a resident opens a conversation, how long they stay,
+what they remember, and how affinity changes. A model can supply a line from
+that situation and fact sheet. Rules remain responsible for the actual effects.
 
-The repository includes Qinglan because the bridge needs a real spatial surface
-to test location, navigation, capabilities, and resident presence. It is
-scaffolding for the runtime, not the public product identity.
+**Grounding.** Generated lines pass through a checker for invented people,
+places, routes, names, promises, and pasts. A flagged line gets one retry; a
+second invalid line is replaced with a rule reply. This is a tested heuristic,
+not a guarantee that every possible invented statement can be detected.
 
-The internal `xianxia` and `godot-taixu-client` paths are implementation
-residues from that first reference world. They will be replaced with a neutral
-example world without changing the authority model. Final maps, sect systems,
-economy, art pipelines, and broad content authoring are deliberately outside
-this baseline.
+In dry mode, rule replies still work and model-dependent lines are explicit
+placeholders. Local dialogue records are not the live world's durable
+relationship or memory tables.
 
-## Compatibility Boundary
+Implementation: [life rules](convex/xianxia/humanLifeLogic.ts),
+[society rules](convex/xianxia/humanSocietyLogic.ts),
+[dialogue engine](godot-taixu-client/tools/player_dialogue_engine.mjs), and
+[line checks](godot-taixu-client/tools/player_dialogue_checks.mjs).
 
-Some schema and utility modules descend from AI Town. They are backend-only
-dependencies retained to keep the baseline executable; they do not reintroduce
-the old Web/Pixi client. See [COMPATIBILITY.md](COMPATIBILITY.md) for the
-migration boundary.
+## Read Models And Timed Bodies
+
+Godot receives rule-owned outcomes alongside display fields such as
+`bubbleText`, `displayText`, `bubbleKind`, and `presentationSource`. Presentation
+can change the wording shown to a player without changing the stored result.
+
+A tick with no durable change returns `tickOnly`. It does not invent a world
+event to create the appearance of activity. Player reads are filtered by viewer
+policy; unrestricted trace and private actor context belong to authorized debug
+surfaces.
+
+Timed-body interfaces let a client fetch movement or action-execution goals,
+play them over time, and report completion. Convex decides what those reports
+mean. The endpoints exist; consuming them in the reference client is still an
+integration milestone.
+
+### Bridge Surfaces
+
+Routes are defined in [`convex/http.ts`](convex/http.ts).
+
+| Method | Endpoint | Purpose |
+| --- | --- | --- |
+| GET | `/godot` | Public non-secret health and contract summary. |
+| GET | `/godot/worldState` | World read model. |
+| GET | `/godot/regionState` | Spatial and regional projection. |
+| POST | `/godot/capabilities` | Currently legal semantic actions. |
+| POST | `/godot/action` | Validate and settle an action. |
+| POST | `/godot/tick` | Authorized debug tick advancement. |
+| GET | `/godot/actorContext` | Context within the principal's scope. |
+| GET | `/godot/actionRecord` | Action trace readback. |
+| GET | `/godot/replay` | Read-only history timeline. |
+| GET | `/godot/presentationPreview` | Preview presentation from an existing result. |
+| GET | `/godot/movementGoals` | Pending movement goals. |
+| POST | `/godot/movementReport` | Report body movement for adjudication. |
+| GET | `/godot/actionExecutionGoals` | Pending timed actions. |
+| POST | `/godot/actionExecutionReport` | Report an action's execution. |
+
+Legacy `/godot/arrive` and `/godot/interact` routes are compatibility adapters
+into the formal action pipeline. The health surface also exists at `/`.
+Detailed request/response contracts and negative cases are in
+[Bridge tests](godot-taixu-client/BRIDGE_TESTS.md).
+
+## Planned Shared-World Extension
+
+The intended multiplayer direction is an asynchronous connection between
+primarily single-player worlds. The service below is **proposed**, not part
+of the current implementation.
+
+```mermaid
+flowchart LR
+    Worlds["Player worlds"] --> Sync["Planned synchronization service"]
+    Sync --> Trade["Shared equipment trading"]
+    Sync --> Messages["Delayed player chat"]
+    Sync --> News["News from selected player activity"]
+    Trade --> Import["World-local rule validation and import"]
+    Messages --> Import
+    News --> Import
+    Import --> Worlds
+```
+
+The planned service would collect selected activity, support equipment
+exchange, and distribute delayed messages and news. Delivery timing, item
+ownership, exchange settlement, and importing shared events into each world
+still need implementation and verification.
+
+Current **read-model projections** are views of one configured world's
+state. They do not implement this cross-player **projection system**. Local
+NPC rumours likewise do not implement a global player news feed.
+
+A complete kingdom simulation, broad hidden-story content, and a general
+weather/encounter system are game-level work beyond the current baseline.
+
+## Source Map And Verification
+
+| Concern | Entry point |
+| --- | --- |
+| HTTP transport and binding | [`http.ts`](convex/http.ts), [`godotBridgeAuth.ts`](convex/godotBridgeAuth.ts) |
+| Bridge contracts and read models | [`godot.ts`](convex/godot.ts), [`godotReadModel.ts`](convex/godotReadModel.ts) |
+| Action settlement and retry identity | [`actions.ts`](convex/xianxia/actions.ts), [`actionIdempotency.ts`](convex/xianxia/actionIdempotency.ts) |
+| NPC turns | [`agent.ts`](convex/xianxia/agent.ts), [`agentTickScheduler.ts`](convex/xianxia/agentTickScheduler.ts) |
+| Life simulation | [`purposeBoundLifeSoakLogic.ts`](convex/xianxia/purposeBoundLifeSoakLogic.ts) |
+| Local player interaction | [`player_dialogue_engine.mjs`](godot-taixu-client/tools/player_dialogue_engine.mjs) |
+
+[CI](.github/workflows/verify.yml) runs static/unit checks and the life/dialogue
+subset. The core local gate adds headless Godot contracts. Connected smoke,
+long soaks, and windowed UI evidence are separate steps described in the
+[runbook](godot-taixu-client/PRODUCTION_RUNBOOK.md).
+
+Qinglan and the `xianxia` module names come from the initial reference world.
+A neutral world pack is planned. Selected AI Town backend modules remain
+transitive schema/runtime dependencies; see [Compatibility](COMPATIBILITY.md)
+and [Notices](NOTICE.md) before replacing or redistributing them.
