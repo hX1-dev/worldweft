@@ -45,15 +45,16 @@ happens.
 | Intent and optional presentation polish | Agent / LLM | May propose; cannot directly write state, events, or records. |
 | Evidence and replay | Durable records | Every real outcome is traceable through records and events. |
 
-## Reference Client
+## In-Game Preview
 
-![Worldweft Godot reference client connected to the Convex world runtime](docs/reference-client.png)
+https://github.com/user-attachments/assets/dfa4b1da-d848-4f2d-9f14-d53d345a0b3d
 
-The connected debug surface above selects a real resident, loads actor context
-and capabilities, advances a tick, and exposes the resulting trace. The Qinglan
-fixture makes spatial presence, route preview, semantic actions, and durable
-readback testable end to end; it is deliberately not presented as a finished
-game or neutral starter world.
+Real-time footage from our xianxia simulator, showing the current HD-2D visuals
+and exploration. The game is still in development.
+
+The Qinglan reference fixture separately tests spatial presence, route preview,
+semantic actions, and durable readback. Life and dialogue integration status is
+documented below.
 
 ## Architecture
 
