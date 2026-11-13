@@ -25,19 +25,19 @@ principle applies to relationships, memories, and events.
 
 ```mermaid
 sequenceDiagram
-    participant C as Godot or NPC intent
-    participant B as Authenticated bridge
-    participant R as Convex rules
-    participant D as Durable world
+    participant C as Godot / NPC
+    participant B as Bridge
+    participant R as World rules
+    participant D as World state
     participant V as Read model
-    C->>B: Semantic action and action identity
-    B->>B: Bind world, actor, and scopes
-    B->>R: Prepare and submit allowed intent
-    R->>R: Recheck presence, capability, prerequisites, and risk
-    R->>R: Resolve idempotency and canonical outcome
-    R->>D: Persist result and applicable state changes
-    D-->>V: Linked records, events, and permitted facts
-    V-->>C: Result, presentation fields, and trace references
+    C->>B: Action and stable ID
+    B->>B: Bind world, actor, scope
+    B->>R: Prepare allowed intent
+    R->>R: Check current rules
+    R->>R: Resolve retry and outcome
+    R->>D: Commit effects and trace
+    D-->>V: Permitted facts and trace
+    V-->>C: Result and presentation
 ```
 
 1. **Authenticate and bind.** Bridge credentials bind the configured world,
