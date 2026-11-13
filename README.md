@@ -1,203 +1,168 @@
 <p align="center">
-  <img src="docs/worldweft-banner.svg" alt="Worldweft: autonomous agents, authoritative rules, durable worlds" width="100%">
+  <img src="docs/worldweft-banner.svg" alt="Worldweft — worlds that live on their own" width="100%">
 </p>
 
 <p align="center">
-  <a href="https://github.com/hX1-dev/worldweft/actions/workflows/verify.yml"><img src="https://github.com/hX1-dev/worldweft/actions/workflows/verify.yml/badge.svg" alt="Verify"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/github/license/hX1-dev/worldweft" alt="MIT License"></a>
-  <img src="https://img.shields.io/badge/status-alpha-d29922" alt="Status: alpha">
-  <img src="https://img.shields.io/badge/Godot-4.x-478CBF?logo=godot-engine&amp;logoColor=white" alt="Godot 4.x">
-</p>
-
-<p align="center">
-  <a href="#architecture">Architecture</a> &middot;
-  <a href="#run-the-core-gate">Quick start</a> &middot;
-  <a href="godot-taixu-client/PRODUCTION_RUNBOOK.md">Runbook</a> &middot;
+  <a href="#quick-start">Quick start</a> &nbsp;·&nbsp;
+  <a href="#architecture">Architecture</a> &nbsp;·&nbsp;
+  <a href="docs/STATUS.md">Implementation status</a> &nbsp;·&nbsp;
   <a href="CONTRIBUTING.md">Contributing</a>
 </p>
 
-Worldweft is an open runtime for persistent, autonomous agent worlds. It pairs
-a Godot client for embodied play with a Convex backend for rule adjudication,
-durable state, and replayable history. Players, agents, and scheduled systems
-may propose actions; only the world runtime can turn those proposals into facts.
+Worldweft is an open-source runtime for persistent NPC worlds, built with
+**Godot and Convex**. Residents act through shared world rules. Their actions
+can change inventories, relationships, memories, and history, with consequences
+that remain traceable after the moment has passed.
 
-This is not an NPC chat wrapper. The simulation continues whether or not a
-player is watching, and every real consequence remains inspectable after it
-happens.
+The core idea is simple: **agents propose, the world decides**. Godot brings
+the world to the screen; Convex validates actions and records what happened.
+Models can contribute intent or dialogue through that same boundary.
 
-## At A Glance
-
-| 9 semantic actions | 11 bridge surfaces | 1,593 unit tests | 15 pinned simulations | 2 live viewport gates |
-| :---: | :---: | :---: | :---: | :---: |
-| Talk through exploration | State, timed bodies, trace readback | Rules, life, dialogue, spatial, replay | Same seeds, same lives | 1024x720 and 1440x900 |
-
-> **Alpha reference implementation.** The authority boundary, semantic action
-> pipeline, replay trace, focused test suite, and Godot contracts are
-> operational. Qinglan is a real integration fixture, not the final public
-> example world.
-
-## System Contract
-
-| Concern | Owner | Non-negotiable rule |
-| --- | --- | --- |
-| Movement, collision, input, and UI | Godot | Embodies the world but never owns durable facts. |
-| Validation, adjudication, and persistence | Convex | The only authority that may create or change world facts. |
-| Intent and optional presentation polish | Agent / LLM | May propose; cannot directly write state, events, or records. |
-| Evidence and replay | Durable records | Every real outcome is traceable through records and events. |
+> **Alpha reference implementation.** The Convex–Godot action loop is
+> implemented. Richer resident life runs in an offline simulation, and player
+> dialogue runs in a separate local lab. Connecting these layers to the live
+> client is the next integration step. See [implementation status](docs/STATUS.md)
+> for the boundary between working code and planned gameplay.
 
 ## In-Game Preview
 
 https://github.com/user-attachments/assets/dfa4b1da-d848-4f2d-9f14-d53d345a0b3d
 
-Real-time footage from our xianxia simulator, showing the current HD-2D visuals
-and exploration. The game is still in development.
+Real-time development footage from our xianxia simulator, showing the current
+HD-2D visuals and exploration. The Qinglan reference client separately exercises
+the runtime's actions, spatial rules, and history readback.
 
-The Qinglan reference fixture separately tests spatial presence, route preview,
-semantic actions, and durable readback. Life and dialogue integration status is
-documented below.
+## What You Can Build On
+
+- **A consistent world.** Actions pass through identity, presence, capability,
+  and rule checks before they change persistent state.
+- **Residents with continuity.** Rule-driven turns, goals, resources,
+  relationships, and memories provide a foundation for lives beyond a single
+  conversation.
+- **Grounded interaction.** The dialogue lab uses personality and world facts;
+  rules govern affinity and memory, while model-written lines are checked.
+- **Inspectable consequences.** Action records, world events, and replay views
+  make it possible to follow a decision through to its outcome.
+
+### Where Each Part Runs Today
+
+| Layer | Current scope |
+| --- | --- |
+| World rules and Godot bridge | Implemented: authenticated actions, state reads, spatial checks, and replay. |
+| Autonomous NPC turns | Implemented: bounded, map-scoped scheduling and rules-first decisions. Automatic ticking requires opt-in. |
+| Rich resident life | Offline simulation: sleep, daily focus, leisure, gifts, debts, quarrels, apologies, rumours, and reputation. |
+| Player dialogue | Local lab: conversation limits, player memory, affinity, and checked model replies. |
+| Timed movement and actions | Backend goals/report interfaces exist; the reference client integration is pending. |
+| Proximity-based AI and shared player worlds | Planned: distance-based model activation, cross-player trading, delayed chat, and shared news. |
+
+[Detailed capability map and source evidence →](docs/STATUS.md)
 
 ## Architecture
 
-![Worldweft authority architecture](docs/architecture.svg)
+![Worldweft runtime architecture: clients and resident turns submit actions to Convex; rules settle durable facts and return read models](docs/architecture.svg)
 
-- Godot sends a **semantic action**, never a claimed outcome or authored story.
-- Convex verifies identity, semantic presence, capability, idempotency,
-  prerequisites, and risk before applying canonical rules.
-- `actionRecords`, `worldEvents`, relationships, memories, and world state are
-  durable rule-owned facts.
-- `bubbleText`, `displayText`, and `presentationSource` form a separate
-  presentation layer that cannot rewrite those facts.
-- A tick without a durable change returns `tickOnly`; it never fabricates a
-  `worldEvent` to make the client appear active.
-
-Read the full [architecture](ARCHITECTURE.md) and the durable
-[bridge contract](godot-taixu-client/BRIDGE_TESTS.md).
-
-## Run The Core Gate
-
-**Requirements:** Node.js 20-24 and Godot 4.3+. The published baseline is
-exercised with Node 24 and Godot 4.7.
-
-```bash
-npm ci
-GODOT_BIN=/path/to/Godot npm run godot:check-core
-```
-
-The gate imports Godot assets, verifies the release-source boundary, typechecks
-and lints the bridge, runs the focused unit tests, and validates headless Godot
-contracts. A connected session and release evidence are documented in the
-[production runbook](godot-taixu-client/PRODUCTION_RUNBOOK.md).
-
-Life and dialogue have their own checks, and none of them call a model:
-
-```bash
-npm test                          # every unit test
-npm run life:check-baseline       # 15 fixed simulations, about 5 minutes (--quick: s1 only)
-npm run dialogue:check-memory     # what residents remember from what you said
-npm run dialogue:check-affinity   # how their opinion of you moves
-npm run dialogue:chat             # chat window on 127.0.0.1:8766
-```
-
-The chat window uses template replies unless `XIANXIA_PI_NPC_DEEPSEEK_API_KEY`
-is set in its environment. Keep that key in an environment variable or a local
-file; it is never written to logs.
-
-## What Ships Today
-
-- Authenticated world, region, capability, action, tick, actor-context, and
-  action-record bridge surfaces.
-- Formal conversation, gift, trade, sparring, teaching, cultivation,
-  breakthrough, arrival, and exploration actions.
-- An inspectable `tick -> action -> event -> actionRecord` lifecycle.
-- Capability, semantic-presence, idempotency, risk-confirmation, presentation,
-  and tick-only contracts.
-- Resident inspection, action selection, event bubbles, route preview, and
-  replay/debug tooling in the Godot reference client.
-- Timed-body endpoints: a client can pull movement and action-execution goals,
-  play them out over time, and report back; Convex still decides what each
-  report means. The reference client does not use them yet.
-- Rule-driven resident life behind the `humanLifeV1` flag: a sleep window per
-  person, a focus for each day, leisure and outings, chat chemistry, gifts and
-  debts, quarrels, grudges that fade, apologies, rumours that get garbled when
-  retold, and reputations built from what people have heard.
-- Player dialogue: rules decide whether a resident talks, for how long, when
-  they leave, what they remember about you, and how their opinion of you
-  changes. The language model only writes the lines, from the facts the rules
-  hand it. Before a line is spoken, a checker looks for invented people,
-  places, routes, names, promises, and pasts; the model gets one retry, and a
-  rule line replaces it if the retry is still wrong.
-
-## Measured, Not Assumed
-
-Each of these comes from a fixed-seed run or a written standard. The reports are
-in Chinese under [`docs/`](docs).
-
-- **Rules choose; the model speaks.** In a paired A/B over three seeds of 3,600
-  ticks, DeepSeek picked from the same legal candidates as the rules. Choice
-  entropy showed no significant gain (+0.029 bits, 95% CI −0.012 to +0.067),
-  the chat rate fell by 13.4 points, and the model only ever reached about 5%
-  of world decisions. Per-tick choice therefore stays in the rules
-  ([report](docs/ab-rules-vs-deepseek-2026-10-21.md)).
-- **Humanity has a score.** A 100-point standard covers individuals,
-  relationships, and society, with 14 points reserved for blind human rating
-  ([standard](docs/NPC人性过关标准.md)). With rules deciding and DeepSeek
-  speaking, the score went from 26 to 78 with the life rules (rules alone: 24
-  to 76)
-  ([life v1](docs/NPC人性优化_拟人生活v1_2026-10-23.md),
-  [conflict, rumour, reputation](docs/NPC人性优化_冲突流言名声_2026-10-23.md)).
-  The blind rating has not been done yet.
-- **Dialogue has gates.** The [dialogue standard](docs/玩家对话过关标准.md)
-  covers persona consistency, human feel, and token cost. Scripted live runs
-  scored 85, 80, and 85 out of the automated 85. A conversation averaged about
-  341 tokens at full price, meaning prompt-cache misses plus completion.
-- **Behaviour is pinned.** `npm run life:check-baseline` reruns 15 fixed
-  simulations: rules and life rules, full and memory-only knowledge, 37.5 and
-  100 days. It compares each run's trajectory digest, so a refactor that
-  changes how residents live shows up as a mismatch.
-
-Life rules run in the offline simulation (`purposeBoundLifeSoakLogic`), and
-dialogue runs in a local chat tool on top of that world. Neither is wired into
-the live Godot tick yet.
-
-## Repository Map
-
-| Path | Responsibility |
+| Part | Responsibility |
 | --- | --- |
-| [`convex/`](convex) | Authoritative bridge, rule layer, durable contracts, and tests. |
-| [`godot-taixu-client/`](godot-taixu-client) | Godot reference client, presentation, and contract tooling. |
-| [`data/`](data) | Reference-world spatial and fixture data. |
-| [`docs/`](docs) | Evaluation standards and reports (Chinese): A/B, humanity, dialogue. |
-| [`ARCHITECTURE.md`](ARCHITECTURE.md) | Authority model, runtime flow, and public boundary. |
-| [`godot-taixu-client/HARDENING_PLAN.md`](godot-taixu-client/HARDENING_PLAN.md) | Reliability and maintainability roadmap. |
+| **Godot** | Movement, collision, input, animation, and presentation. |
+| **NPC decision layer** | Observe the world and propose an allowed action. Rules drive the default path; optional model routes are gated. |
+| **Convex** | Validate, adjudicate, and persist world facts. |
+| **History and read models** | Expose permitted state, linked outcomes, and replay without granting write authority. |
 
-## Scope And Roadmap
+A gift becomes an inventory transfer only when the world rules accept it.
+A line of dialogue cannot create an item or rewrite a relationship on its own.
+Retries retain the same action identity so they do not apply the result twice.
 
-Worldweft is an infrastructure baseline, not a finished game. Final maps,
-economy, broad content authoring, art pipelines, and player progression belong
-above this layer.
+The [architecture guide](ARCHITECTURE.md) covers the action lifecycle, NPC
+scheduler, dialogue pipeline, runtime switches, HTTP surfaces, and the proposed
+shared-world extension.
 
-- **Current:** tested Convex-Godot authority boundary, Qinglan reference world,
-  rule-driven resident life, and rule-gated player dialogue.
-- **Next:** wire the life rules and dialogue into the live tick and the Godot
-  client, a neutral example world, and repeatable public demo capture.
-- **Later:** configurable world packs, richer replay tooling, and cleaner
-  public package boundaries.
+## Quick Start
 
-## Project Links
+Use **Node.js 24** for the documented baseline. The package supports Node 20–24.
+The dialogue lab needs neither Godot nor a running Convex deployment.
 
-- [Contributing](CONTRIBUTING.md)
-- [Security policy](SECURITY.md)
-- [Support](SUPPORT.md)
-- [Code of conduct](CODE_OF_CONDUCT.md)
-- [Compatibility boundary](COMPATIBILITY.md)
-- [Positioning and influences](POSITIONING.md)
+```bash
+git clone https://github.com/hX1-dev/worldweft.git
+cd worldweft
+npm ci
+npm run dialogue:chat -- --dry
+```
 
-## Acknowledgements
+Open **http://127.0.0.1:8766**. On the first run, the tool generates a rule-driven
+world log; allow about a minute before the page becomes available.
 
-Worldweft carries forward lessons and selected MIT-licensed code from
-[AI Town](https://github.com/a16z-infra/ai-town), while taking inspiration from
+Dry mode exercises the conversation rules, memory, and affinity without model
+calls. Lines that require a model appear as placeholders. To use generated
+replies, supply `XIANXIA_PI_NPC_DEEPSEEK_API_KEY` in the process environment and
+run `npm run dialogue:chat` without `--dry`.
+
+For the connected Godot client, use [Getting started](docs/GETTING_STARTED.md).
+It explains the deployment and seeded-world prerequisites as well as the local
+lab; a clean checkout does not yet bootstrap a connected world in one command.
+
+## Verification
+
+[![Verify](https://github.com/hX1-dev/worldweft/actions/workflows/verify.yml/badge.svg)](https://github.com/hX1-dev/worldweft/actions/workflows/verify.yml)
+
+The checks cover rule behavior, authority boundaries, dialogue, and repeatable
+simulation trajectories. The life and dialogue checks below do not call a model.
+
+| Command | Checks |
+| --- | --- |
+| `npm run godot:check-core` | Source boundary, types, lint, focused unit tests, and headless Godot contracts. |
+| `npm run life:check-baseline` | All 15 fixed simulation trajectories; `-- --quick` runs the five s1 cases. |
+| `npm run dialogue:check-memory` | What residents retain from player conversations. |
+| `npm run dialogue:check-affinity` | Relationship changes, apologies, and conversation reactions. |
+
+The core gate requires **Godot 4.3+**; the published engine baseline is 4.7.
+Use `GODOT_BIN` to point at the executable. On Windows, run the core npm
+verification scripts from Git Bash because they use POSIX environment syntax.
+The dialogue commands also work in PowerShell.
+
+CI runs source, static, unit, simulation, and dialogue checks. A connected backend
+and windowed Godot checks remain separate verification steps; see the
+[runbook](godot-taixu-client/PRODUCTION_RUNBOOK.md).
+
+Design evidence includes the [rules/model comparison](docs/ab-rules-vs-deepseek-2026-10-21.md),
+[resident-life standard](docs/NPC人性过关标准.md), and
+[dialogue standard](docs/玩家对话过关标准.md). These are scoped development
+experiments; the planned blind human rating has not yet been completed.
+
+## Roadmap
+
+1. Connect the richer life rules and player dialogue to the live Godot loop.
+2. Integrate timed movement/action goals and publish a repeatable playable demo.
+3. Add a neutral example world and clearer world-pack boundaries.
+4. Explore proximity-based model activation and asynchronous connections
+   between player worlds: equipment trading, delayed chat, and shared news.
+
+These are development directions. The [status page](docs/STATUS.md) records what
+is currently implemented, experimentally verified, and still planned.
+
+## Explore The Repository
+
+| Path | What is there |
+| --- | --- |
+| [`convex/`](convex) | World rules, bridge, durable state, NPC runtime, and tests. |
+| [`godot-taixu-client/`](godot-taixu-client) | Reference client, contract checks, dialogue tools, and simulations. |
+| [`data/`](data) | Reference-world definitions and spatial fixtures. |
+| [`docs/`](docs) | Getting started, capability status, and evaluation reports. |
+
+Start with [Getting started](docs/GETTING_STARTED.md),
+[Architecture](ARCHITECTURE.md), or [Implementation status](docs/STATUS.md).
+For changes, read [Contributing](CONTRIBUTING.md). Questions belong in
+[Discussions](https://github.com/hX1-dev/worldweft/discussions); reproducible bugs
+belong in [Issues](https://github.com/hX1-dev/worldweft/issues).
+
+## Origins And License
+
+Worldweft builds on lessons and selected MIT-licensed code from
+[AI Town](https://github.com/a16z-infra/ai-town), and takes inspiration from
 the Godot-native multi-agent direction of
-[Microverse](https://github.com/KsanaDock/Microverse). See [NOTICE.md](NOTICE.md)
-for attribution and fixture-asset notes.
+[Microverse](https://github.com/KsanaDock/Microverse).
+See [Positioning](POSITIONING.md) for the design direction and
+[Compatibility](COMPATIBILITY.md) for retained backend modules.
 
-Released under the [MIT License](LICENSE).
+Released under the [MIT License](LICENSE). Third-party attribution, font
+licenses, and reference-fixture notes are recorded in [NOTICE.md](NOTICE.md).
+Release work is tracked in the [readiness checklist](OPEN_SOURCE_CHECKLIST.md).

@@ -1,90 +1,66 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="760" viewBox="0 0 1200 760" role="img" aria-labelledby="title desc">
-  <title id="title">Worldweft authority architecture</title>
-  <desc id="desc">Godot clients and language-model agents submit semantic intent through an authenticated bridge. Convex validates intent, applies rules, writes durable facts, and returns read models. Neither Godot nor an LLM can write durable world state directly.</desc>
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="670" viewBox="0 0 1200 670" role="img" aria-labelledby="title desc">
+  <title id="title">Worldweft runtime architecture</title>
+  <desc id="desc">Godot and bounded NPC turns submit semantic actions to Convex. Convex validates and settles the actions, persists facts, and returns viewer-safe state and history. Life and dialogue labs are documented separately.</desc>
   <defs>
-    <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto" markerUnits="strokeWidth"><path d="M0 0 L10 5 L0 10 Z" fill="#d0d7de"/></marker>
-    <marker id="arrow-blue" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto" markerUnits="strokeWidth"><path d="M0 0 L10 5 L0 10 Z" fill="#58a6ff"/></marker>
-    <marker id="arrow-red" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto" markerUnits="strokeWidth"><path d="M0 0 L10 5 L0 10 Z" fill="#f85149"/></marker>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10z" fill="#b6c9cb"/></marker>
+    <marker id="readArrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10z" fill="#79bfcd"/></marker>
     <style>
-      .canvas { fill:#0d1117; }
-      .panel { fill:#161b22; stroke:#30363d; stroke-width:2; }
-      .bridge { fill:#1b1a12; stroke:#d29922; stroke-width:3; }
-      .runtime { fill:#101b2d; stroke:#58a6ff; stroke-width:3; }
-      .step { fill:#0d1117; stroke:#8b949e; stroke-width:2; }
-      .store { fill:#13261c; stroke:#3fb950; stroke-width:3; }
-      .divider { stroke:#30363d; stroke-width:2; }
-      .kicker { fill:#8b949e; font:700 14px Arial,sans-serif; letter-spacing:2px; }
-      .title { fill:#f0f6fc; font:700 29px Arial,sans-serif; }
-      .heading { fill:#f0f6fc; font:700 20px Arial,sans-serif; }
-      .body { fill:#c9d1d9; font:16px Arial,sans-serif; }
-      .small { fill:#8b949e; font:14px Arial,sans-serif; }
-      .label { fill:#d0d7de; font:700 13px Arial,sans-serif; letter-spacing:1px; }
-      .command { fill:none; stroke:#d0d7de; stroke-width:3; stroke-linecap:square; stroke-linejoin:miter; marker-end:url(#arrow); }
-      .projection { fill:none; stroke:#58a6ff; stroke-width:3; stroke-linecap:square; stroke-linejoin:miter; marker-end:url(#arrow-blue); }
-      .blocked { fill:none; stroke:#f85149; stroke-width:3; stroke-dasharray:9 6; stroke-linecap:square; stroke-linejoin:miter; marker-end:url(#arrow-red); }
+      text { font-family:Segoe UI,Helvetica,Arial,sans-serif; }
+      .title { fill:#f1f6f4; font-size:28px; font-weight:600; }
+      .sub { fill:#9bb5b8; font-size:16px; }
+      .label { fill:#b9d6a5; font-size:13px; font-weight:600; letter-spacing:1.8px; }
+      .heading { fill:#f1f6f4; font-size:23px; font-weight:600; }
+      .body { fill:#b7cbcd; font-size:17px; }
+      .note { fill:#9bb5b8; font-size:14px; }
+      .box { fill:#16252c; stroke:#345059; stroke-width:1.5; }
+      .rule { stroke:#345059; stroke-width:1; }
+      .flow { fill:none; stroke:#b6c9cb; stroke-width:2; marker-end:url(#arrow); }
     </style>
   </defs>
+  <rect x="0.5" y="0.5" width="1199" height="669" rx="20" fill="#101a21" stroke="#2b4045"/>
+  <text x="40" y="49" class="title">From intent to a persistent world</text>
+  <text x="40" y="80" class="sub">Current runtime · one rule-owned path for player and resident actions</text>
 
-  <rect class="canvas" width="1200" height="760"/>
-  <text x="50" y="52" class="kicker">WORLDWEFT / AUTHORITY MODEL</text>
-  <text x="50" y="92" class="title">One durable world authority. Many embodied participants.</text>
-  <line x1="50" y1="120" x2="1150" y2="120" class="divider"/>
+  <rect x="40" y="125" width="300" height="132" rx="12" class="box"/>
+  <text x="64" y="157" class="label">INPUT + PRESENTATION</text>
+  <text x="64" y="191" class="heading">Godot client</text>
+  <text x="64" y="224" class="body">Movement, interaction, UI</text>
 
-  <rect x="50" y="178" width="260" height="188" class="panel"/>
-  <text x="72" y="212" class="kicker">CLIENT</text>
-  <text x="72" y="248" class="heading">Godot</text>
-  <text x="72" y="280" class="body">Input and interaction</text>
-  <text x="72" y="306" class="body">Space and collision</text>
-  <text x="72" y="332" class="body">UI and presentation</text>
-  <line x1="72" y1="344" x2="288" y2="344" class="divider"/>
-  <text x="72" y="354" class="small">No durable writes</text>
+  <rect x="40" y="305" width="300" height="132" rx="12" class="box"/>
+  <text x="64" y="337" class="label">AUTONOMOUS TURNS</text>
+  <text x="64" y="371" class="heading">Resident decision layer</text>
+  <text x="64" y="404" class="body">Context → legal intent</text>
 
-  <rect x="50" y="470" width="260" height="150" class="panel"/>
-  <text x="72" y="504" class="kicker">PROPOSER</text>
-  <text x="72" y="540" class="heading">Agent / LLM</text>
-  <text x="72" y="572" class="body">Intent and display polish</text>
-  <line x1="72" y1="586" x2="288" y2="586" class="divider"/>
-  <text x="72" y="606" class="small">No rule or fact authority</text>
+  <rect x="430" y="125" width="340" height="312" rx="12" fill="#172b31" stroke="#79bfcd" stroke-width="1.5"/>
+  <text x="455" y="157" class="label">WORLD AUTHORITY</text>
+  <text x="455" y="191" class="heading">Convex runtime</text>
+  <path d="M455 212 H745" class="rule"/>
+  <text x="455" y="247" class="body">01  Bind identity and scope</text>
+  <text x="455" y="286" class="body">02  Check current world rules</text>
+  <text x="455" y="325" class="body">03  Settle the action once</text>
+  <path d="M455 350 H745" class="rule"/>
+  <text x="455" y="382" class="note">Presence · capability · prerequisites</text>
+  <text x="455" y="405" class="note">Risk · retry identity · consequences</text>
 
-  <rect x="425" y="272" width="285" height="238" class="bridge"/>
-  <text x="449" y="308" class="kicker">BOUNDARY API</text>
-  <text x="449" y="344" class="heading">Authenticated Bridge</text>
-  <line x1="449" y1="360" x2="686" y2="360" class="divider"/>
-  <text x="449" y="394" class="label">ACCEPTS</text>
-  <text x="449" y="420" class="body">semantic action, tick, intent</text>
-  <text x="449" y="462" class="label">RETURNS</text>
-  <text x="449" y="488" class="body">read model and trace</text>
+  <rect x="860" y="125" width="300" height="312" rx="12" class="box"/>
+  <text x="884" y="157" class="label">DURABLE FACTS</text>
+  <text x="884" y="191" class="heading">World state + history</text>
+  <path d="M884 212 H1136" class="rule"/>
+  <text x="884" y="252" class="body">Profiles and inventories</text>
+  <text x="884" y="291" class="body">Relationships and memories</text>
+  <text x="884" y="330" class="body">Action records and events</text>
+  <text x="884" y="396" class="note">Changes retain linked evidence.</text>
 
-  <rect x="830" y="154" width="320" height="442" class="runtime"/>
-  <text x="854" y="190" class="kicker">AUTHORITATIVE BACKEND</text>
-  <text x="854" y="226" class="heading">Convex World Runtime</text>
-  <line x1="854" y1="242" x2="1126" y2="242" class="divider"/>
-  <rect x="854" y="270" width="272" height="72" class="step"/>
-  <text x="874" y="298" class="label">01  VALIDATE</text>
-  <text x="874" y="322" class="small">identity, presence, capability, risk</text>
-  <rect x="854" y="370" width="272" height="72" class="step"/>
-  <text x="874" y="398" class="label">02  ADJUDICATE</text>
-  <text x="874" y="422" class="small">canonical rules and idempotency</text>
-  <rect x="854" y="470" width="272" height="102" class="store"/>
-  <text x="874" y="498" class="label">03  PERSIST</text>
-  <text x="874" y="524" class="small">actionRecords and worldEvents</text>
-  <text x="874" y="548" class="small">relationships, memories, projections</text>
+  <rect x="430" y="505" width="730" height="105" rx="12" class="box"/>
+  <text x="455" y="538" class="label">READ MODELS + HISTORY</text>
+  <text x="455" y="577" class="body">Viewer-safe state · action results · presentation · replay</text>
 
-  <path d="M310 300 H425" class="command"/>
-  <path d="M310 540 H378 V438 H425" class="command"/>
-  <path d="M710 330 H830" class="command"/>
-  <path d="M990 342 V370" class="command"/>
-  <path d="M990 442 V470" class="command"/>
-
-  <path d="M830 538 H760 V488 H710" class="projection"/>
-  <path d="M425 350 H310" class="projection"/>
-
-  <path d="M310 592 H382 V662 H990 V596" class="blocked"/>
-  <text x="572" y="688" class="small" fill="#f85149">BLOCKED: NO DIRECT DURABLE WRITE</text>
-
-  <rect x="50" y="712" width="1100" height="28" class="panel"/>
-  <text x="72" y="732" class="small">White: proposed intent and command</text>
-  <text x="370" y="732" class="small" fill="#58a6ff">Blue: authoritative read model</text>
-  <text x="676" y="732" class="small" fill="#f85149">Red: rejected direct write</text>
-  <text x="948" y="732" class="small">Every outcome is auditable.</text>
+  <path d="M340 191 H430" class="flow"/>
+  <path d="M340 371 H430" class="flow"/>
+  <path d="M770 281 H860" class="flow"/>
+  <path d="M1010 437 V505" class="flow"/>
+  <path d="M430 557 H20 V191 H40" fill="none" stroke="#79bfcd" stroke-width="2" marker-end="url(#readArrow)"/>
+  <text x="59" y="521" class="note">State and results return</text>
+  <text x="59" y="544" class="note">to the client.</text>
+  <text x="40" y="643" class="note">Life and player dialogue currently run in separate labs. See the architecture guide for their integration paths.</text>
 </svg>

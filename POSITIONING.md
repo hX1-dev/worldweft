@@ -1,4 +1,23 @@
-# Positioning
+# Project Direction
+
+Worldweft is an open-source runtime for persistent NPC worlds, built with Godot
+and Convex. The initial reference world is a xianxia simulation; reusable world
+definitions and a neutral example world are longer-term goals.
+
+## Current Focus
+
+The connected action/state loop, rules-first resident turns, and history
+readback are implemented. Richer resident life and player dialogue run in
+separate tools. The immediate work is integrating those layers into the live
+client and making a fresh connected world reproducible.
+
+Planned shared-player services include equipment trading, delayed chat, and
+news assembled from selected player activity. Player-radius model activation
+and cross-world synchronization remain future integration work. Current read
+models and in-world trade actions do not implement those services.
+
+[Implementation status](docs/STATUS.md) records the scope and source evidence
+for each capability. The sections below describe the architectural direction.
 
 ## The Promise
 
