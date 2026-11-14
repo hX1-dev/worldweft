@@ -22,9 +22,8 @@ cd worldweft
 npm ci
 ```
 
-Run commands from the repository root. The dialogue commands work in
-PowerShell and POSIX shells. Use Git Bash on Windows for the core verification
-scripts, which contain POSIX environment assignments.
+Run commands from the repository root. The core and dialogue npm commands work
+in PowerShell and POSIX shells; Git Bash is not required on Windows.
 
 ## 2. Try The Dialogue Lab
 
@@ -65,15 +64,37 @@ npm run life:check-baseline -- --quick
 Quick mode runs five s1 cases. Omit `-- --quick` for all 15 fixed trajectories.
 Generated reports stay under the ignored `.logs/` directory.
 
-The core gate also requires Godot. In Bash or Git Bash:
+Source, static, soak-policy, and unit checks need only Node.js and Git:
+
+```bash
+npm run godot:check-source
+npm run godot:check-static
+npm run godot:check-soak-policy
+npm run godot:check-unit
+```
+
+The complete core gate also runs headless Godot contracts. Set the path to an
+installed Godot executable, then run the gate. In PowerShell:
+
+```powershell
+$env:GODOT_BIN = 'C:\Tools\Godot\Godot.exe'
+npm run godot:check-core
+```
+
+In Bash:
 
 ```bash
 GODOT_BIN="/path/to/Godot" npm run godot:check-core
 ```
 
-For Git Bash on Windows, a path such as `C:/Tools/Godot/Godot.exe` is suitable.
-The core gate checks source boundaries, types, lint, unit behavior, and
-headless client contracts. It does not start a connected world.
+Replace the example path with your installed executable. The core gate checks
+source boundaries, types, lint, soak policy, unit behavior, and headless client
+contracts. It does not start a connected world. CI runs the Node-only checks
+on Linux and Windows; life and dialogue checks run on Linux.
+
+Connected smoke/soak checks and release snapshot tooling have additional
+deployment and platform prerequisites; follow the
+[runbook](../godot-taixu-client/PRODUCTION_RUNBOOK.md) for those workflows.
 
 ## 4. Use The Connected Reference Client
 
@@ -109,5 +130,6 @@ still run; model-dependent lines need the optional key and a run without `--dry`
 the Convex API port from its HTTP action origin. Then use the runbook's
 [failure triage](../godot-taixu-client/PRODUCTION_RUNBOOK.md#failure-triage).
 
-[README](../README.md) · [Architecture](../ARCHITECTURE.md) ·
+[Documentation index](README.md) · [中文首页](../README.zh-CN.md) ·
+[Architecture](../ARCHITECTURE.md) ·
 [Implementation status](STATUS.md) · [Support](../SUPPORT.md)

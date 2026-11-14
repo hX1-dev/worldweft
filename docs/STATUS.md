@@ -56,9 +56,10 @@ connections between players. See the
 ## Verification And Next Milestones
 
 Current [CI](https://github.com/hX1-dev/worldweft/actions/workflows/verify.yml)
-runs source, type, lint, unit, quick life-baseline, and dialogue checks. The
-full life baseline contains 15 fixed trajectories; CI's quick mode runs the
-five s1 cases. Connected Convex and windowed Godot checks are separate.
+runs source, type, lint, soak-policy, and unit checks on Linux and Windows.
+Quick life-baseline and dialogue checks run on Linux. The full life baseline
+contains 15 fixed trajectories; CI's quick mode runs the five s1 cases.
+Connected Convex and windowed Godot checks are separate.
 
 Evaluation reports in this directory are development measurements: rule/model
 comparisons, resident-life scoring, and scripted dialogue runs. The proposed

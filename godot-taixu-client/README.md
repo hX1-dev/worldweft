@@ -48,13 +48,21 @@ See [Implementation status](../docs/STATUS.md) for those boundaries.
 
 ## Verification
 
-From the repository root, in Bash or Git Bash:
+From the repository root, in PowerShell:
+
+```powershell
+$env:GODOT_BIN = 'C:\Tools\Godot\Godot.exe'
+npm run godot:check-core
+```
+
+Or in Bash:
 
 ```bash
 GODOT_BIN="/path/to/Godot" npm run godot:check-core
 ```
 
-This includes source, static, unit, and headless Godot contract checks.
+Replace the example path with your installed executable. This includes source,
+static, soak-policy, unit, and headless Godot contract checks.
 [Bridge tests](BRIDGE_TESTS.md) describe the contracts and negative cases.
 The [runbook](PRODUCTION_RUNBOOK.md) describes connected smoke, soak, and
 windowed evidence. [HARDENING_PLAN.md](HARDENING_PLAN.md) preserves historical

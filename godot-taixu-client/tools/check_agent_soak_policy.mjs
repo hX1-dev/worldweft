@@ -30,6 +30,25 @@ assert(long.contextActors === 12, 'long soak supports bounded actor coverage');
 assert(long.requireMemoryDelta, 'long soak can require memory delta');
 assert(long.requireRelationshipDelta, 'long soak can require relationship delta');
 
+const presetEnv = Object.freeze({
+  GODOT_SOAK_TICKS: '2',
+  GODOT_SOAK_TICK_LIMIT: '6',
+  GODOT_SOAK_REQUIRE_MEMORY_DELTA: '0',
+  GODOT_SOAK_REQUIRE_RELATIONSHIP_DELTA: '0',
+});
+const preset = readAgentSoakConfig(presetEnv, true);
+assert(preset.ticks === 24, 'long preset overrides tick count');
+assert(preset.delayMs === 500, 'long preset retains 500ms delay');
+assert(preset.contextActors === 12, 'long preset covers 12 actors');
+assert(preset.requestTimeoutMs === 60000, 'long preset retains request timeout');
+assert(preset.maxRuntimeMs === 1200000, 'long preset retains runtime budget');
+assert(preset.maxTotalResponseBytes === 128000000, 'long preset retains response budget');
+assert(preset.requireMemoryDelta, 'long preset requires memory changes');
+assert(preset.requireRelationshipDelta, 'long preset requires relationship changes');
+assert(preset.tickLimit === 6, 'long preset preserves settings outside its preset');
+assert(presetEnv.GODOT_SOAK_TICKS === '2', 'long preset leaves the environment unchanged');
+assert(readAgentSoakConfig(presetEnv).ticks === 2, 'normal soak still uses environment settings');
+
 const clamped = readAgentSoakConfig({
   GODOT_SOAK_TICKS: '999',
   GODOT_SOAK_TICK_LIMIT: '-2',

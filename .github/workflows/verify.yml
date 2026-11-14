@@ -25,6 +25,23 @@ jobs:
       - run: npm run godot:check-soak-policy
       - run: npm run godot:check-unit
 
+  windows:
+    name: Windows commands
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm test -- --runInBand convex/godotBridgeAuth.test.ts
+      - run: npm run godot:check-source
+      - run: npm run godot:check-static
+      - run: npm run godot:check-soak-policy
+      - run: npm run godot:check-unit -- --runInBand
+
   life-and-dialogue:
     name: Life baseline and dialogue checks
     runs-on: ubuntu-latest

@@ -3,6 +3,11 @@
 </p>
 
 <p align="center">
+  English &nbsp;·&nbsp; <a href="README.zh-CN.md">简体中文</a> &nbsp;·&nbsp;
+  <a href="docs/README.md">Documentation</a>
+</p>
+
+<p align="center">
   <a href="#quick-start">Quick start</a> &nbsp;·&nbsp;
   <a href="#architecture">Architecture</a> &nbsp;·&nbsp;
   <a href="docs/STATUS.md">Implementation status</a> &nbsp;·&nbsp;
@@ -115,12 +120,12 @@ simulation trajectories. The life and dialogue checks below do not call a model.
 | `npm run dialogue:check-affinity` | Relationship changes, apologies, and conversation reactions. |
 
 The core gate requires **Godot 4.3+**; the published engine baseline is 4.7.
-Use `GODOT_BIN` to point at the executable. On Windows, run the core npm
-verification scripts from Git Bash because they use POSIX environment syntax.
-The dialogue commands also work in PowerShell.
+Core and dialogue commands work in PowerShell and POSIX shells. Set `GODOT_BIN`
+to the executable using the [examples for your shell](docs/GETTING_STARTED.md#3-run-the-checks).
 
-CI runs source, static, unit, simulation, and dialogue checks. A connected backend
-and windowed Godot checks remain separate verification steps; see the
+CI runs source, static, soak-policy, and unit checks on Linux and Windows,
+plus simulation and dialogue checks on Linux. Connected backend and windowed
+Godot checks remain separate verification steps; see the
 [runbook](godot-taixu-client/PRODUCTION_RUNBOOK.md).
 
 Design evidence includes the [rules/model comparison](docs/ab-rules-vs-deepseek-2026-10-21.md),
@@ -146,7 +151,7 @@ is currently implemented, experimentally verified, and still planned.
 | [`convex/`](convex) | World rules, bridge, durable state, NPC runtime, and tests. |
 | [`godot-taixu-client/`](godot-taixu-client) | Reference client, contract checks, dialogue tools, and simulations. |
 | [`data/`](data) | Reference-world definitions and spatial fixtures. |
-| [`docs/`](docs) | Getting started, capability status, and evaluation reports. |
+| [Documentation index](docs/README.md) | Getting started, capability status, and evaluation reports. |
 
 Start with [Getting started](docs/GETTING_STARTED.md),
 [Architecture](ARCHITECTURE.md), or [Implementation status](docs/STATUS.md).

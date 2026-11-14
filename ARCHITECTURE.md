@@ -238,8 +238,9 @@ weather/encounter system are game-level work beyond the current baseline.
 | Life simulation | [`purposeBoundLifeSoakLogic.ts`](convex/xianxia/purposeBoundLifeSoakLogic.ts) |
 | Local player interaction | [`player_dialogue_engine.mjs`](godot-taixu-client/tools/player_dialogue_engine.mjs) |
 
-[CI](.github/workflows/verify.yml) runs static/unit checks and the life/dialogue
-subset. The core local gate adds headless Godot contracts. Connected smoke,
+[CI](.github/workflows/verify.yml) runs source, static, soak-policy, and unit
+checks on Linux and Windows, plus the life/dialogue subset on Linux.
+The core local gate adds headless Godot contracts. Connected smoke,
 long soaks, and windowed UI evidence are separate steps described in the
 [runbook](godot-taixu-client/PRODUCTION_RUNBOOK.md).
 
