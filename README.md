@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/worldweft-banner.svg" alt="Worldweft — worlds that live on their own" width="100%">
+  <img src="docs/worldweft-cover.png" alt="Worldweft — worlds that live on their own; a miniature inhabited landscape woven from fabric" width="100%">
 </p>
 
 <p align="center">
@@ -165,4 +165,5 @@ See [Positioning](POSITIONING.md) for the design direction and
 
 Released under the [MIT License](LICENSE). Third-party attribution, font
 licenses, and reference-fixture notes are recorded in [NOTICE.md](NOTICE.md).
+Cover artwork and the editable diagram are documented in [Brand assets](docs/brand/README.md).
 Release work is tracked in the [readiness checklist](OPEN_SOURCE_CHECKLIST.md).
