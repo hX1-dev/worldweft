@@ -34,8 +34,9 @@ verification first. Check current work before starting a competing implementatio
 | Dialogue | Memory/affinity checks and relevant conversation cases; model runs only when explicitly intended. |
 | Connected or visual behavior | Appropriate live bridge or windowed client evidence in addition to headless checks. |
 
-Use Node 24 for the baseline and Bash or Git Bash for core npm verification;
-see [Getting started](docs/GETTING_STARTED.md#3-run-the-checks).
+Use Node 24 for the baseline. Core npm verification works in PowerShell and
+POSIX shells; the complete gate also needs Godot. See
+[Getting started](docs/GETTING_STARTED.md#3-run-the-checks) for shell-specific setup.
 
 ## Open A Pull Request
 

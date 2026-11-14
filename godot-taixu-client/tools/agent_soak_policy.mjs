@@ -9,7 +9,20 @@ const DEFAULTS = Object.freeze({
   maxTotalResponseBytes: 32_000_000,
 });
 
-export function readAgentSoakConfig(env = process.env) {
+export function readAgentSoakConfig(env = process.env, longProfile = false) {
+  if (longProfile) {
+    env = {
+      ...env,
+      GODOT_SOAK_TICKS: '24',
+      GODOT_SOAK_DELAY_MS: '500',
+      GODOT_SOAK_CONTEXT_ACTORS: '12',
+      GODOT_SOAK_REQUEST_TIMEOUT_MS: '60000',
+      GODOT_SOAK_MAX_RUNTIME_MS: '1200000',
+      GODOT_SOAK_MAX_TOTAL_RESPONSE_BYTES: '128000000',
+      GODOT_SOAK_REQUIRE_MEMORY_DELTA: '1',
+      GODOT_SOAK_REQUIRE_RELATIONSHIP_DELTA: '1',
+    };
+  }
   const ticks = boundedInt(env.GODOT_SOAK_TICKS, DEFAULTS.ticks, 1, 60);
   const delayMs = boundedInt(env.GODOT_SOAK_DELAY_MS, DEFAULTS.delayMs, 0, 10_000);
   const config = {
