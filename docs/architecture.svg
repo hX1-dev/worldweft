@@ -1,66 +1,78 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="670" viewBox="0 0 1200 670" role="img" aria-labelledby="title desc">
-  <title id="title">Worldweft runtime architecture</title>
-  <desc id="desc">Godot and bounded NPC turns submit semantic actions to Convex. Convex validates and settles the actions, persists facts, and returns viewer-safe state and history. Life and dialogue labs are documented separately.</desc>
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900" role="img" aria-labelledby="title desc">
+  <title id="title">Worldweft: from intent to world facts</title>
+  <desc id="desc">Four stages share one runtime contract. Godot and resident turns propose semantic actions. Convex validates and settles them. Durable facts retain profiles, inventory, relationships, memories, actions and events. Scoped read models return state, presentation and history for the next observation. Rich life and dialogue labs remain separate integrations.</desc>
   <defs>
-    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10z" fill="#b6c9cb"/></marker>
-    <marker id="readArrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10z" fill="#79bfcd"/></marker>
+    <marker id="flow-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0 0 L10 5 L0 10 Z" fill="#557d72"/>
+    </marker>
     <style>
-      text { font-family:Segoe UI,Helvetica,Arial,sans-serif; }
-      .title { fill:#f1f6f4; font-size:28px; font-weight:600; }
-      .sub { fill:#9bb5b8; font-size:16px; }
-      .label { fill:#b9d6a5; font-size:13px; font-weight:600; letter-spacing:1.8px; }
-      .heading { fill:#f1f6f4; font-size:23px; font-weight:600; }
-      .body { fill:#b7cbcd; font-size:17px; }
-      .note { fill:#9bb5b8; font-size:14px; }
-      .box { fill:#16252c; stroke:#345059; stroke-width:1.5; }
-      .rule { stroke:#345059; stroke-width:1; }
-      .flow { fill:none; stroke:#b6c9cb; stroke-width:2; marker-end:url(#arrow); }
+      text { font-family:"Segoe UI",Helvetica,Arial,sans-serif; }
+      .kicker { font-size:17px; font-weight:600; letter-spacing:2.8px; fill:#647369; }
+      .title { font-size:49px; font-weight:650; letter-spacing:-1.3px; fill:#1e3029; }
+      .subtitle { font-size:24px; fill:#5c6d63; }
+      .stage { font-size:18px; font-weight:600; letter-spacing:1.7px; fill:#7b745e; }
+      .heading { font-size:35px; font-weight:600; letter-spacing:-0.5px; fill:#20352c; }
+      .caption { font-size:21px; fill:#67746a; }
+      .body { font-size:24px; fill:#374a3e; }
+      .detail { font-size:21px; font-weight:500; fill:#497465; }
+      .card { fill:#fffdf8; stroke:#d4d8ca; stroke-width:1.5; }
+      .divider { stroke:#d7ddcf; stroke-width:1.5; }
+      .flow { fill:none; stroke:#557d72; stroke-width:2.5; marker-end:url(#flow-arrow); }
+      .note { font-size:21px; fill:#6b766b; }
     </style>
   </defs>
-  <rect x="0.5" y="0.5" width="1199" height="669" rx="20" fill="#101a21" stroke="#2b4045"/>
-  <text x="40" y="49" class="title">From intent to a persistent world</text>
-  <text x="40" y="80" class="sub">Current runtime · one rule-owned path for player and resident actions</text>
+  <rect x="0.75" y="0.75" width="1598.5" height="898.5" rx="22" fill="#f5f2e9" stroke="#d2d7c9" stroke-width="1.5"/>
+  <text x="64" y="77" class="kicker">WORLDWEFT / SYSTEM OVERVIEW</text>
+  <text x="61" y="149" class="title">How intent becomes a world fact.</text>
+  <text x="64" y="196" class="subtitle">One contract for player actions and autonomous resident turns.</text>
+  <path d="M64 238 H1536" stroke="#ced5c6" stroke-width="1.5"/>
 
-  <rect x="40" y="125" width="300" height="132" rx="12" class="box"/>
-  <text x="64" y="157" class="label">INPUT + PRESENTATION</text>
-  <text x="64" y="191" class="heading">Godot client</text>
-  <text x="64" y="224" class="body">Movement, interaction, UI</text>
+  <rect x="64" y="294" width="300" height="370" rx="18" class="card"/>
+  <text x="92" y="334" class="stage">01 / PROPOSE</text>
+  <text x="92" y="391" class="heading">Intent</text>
+  <text x="92" y="429" class="caption">Godot + resident turns</text>
+  <path d="M92 458 H336" class="divider"/>
+  <text x="92" y="501" class="body">Player commands</text>
+  <text x="92" y="543" class="body">NPC decisions</text>
+  <text x="92" y="621" class="detail">Semantic action</text>
 
-  <rect x="40" y="305" width="300" height="132" rx="12" class="box"/>
-  <text x="64" y="337" class="label">AUTONOMOUS TURNS</text>
-  <text x="64" y="371" class="heading">Resident decision layer</text>
-  <text x="64" y="404" class="body">Context → legal intent</text>
+  <rect x="450" y="294" width="330" height="370" rx="18" fill="#e7eee3" stroke="#87a08c" stroke-width="2"/>
+  <text x="478" y="334" class="stage">02 / ADJUDICATE</text>
+  <text x="478" y="391" class="heading">Convex</text>
+  <text x="478" y="429" class="caption">World authority</text>
+  <path d="M478 458 H752" stroke="#c4d2c2" stroke-width="1.5"/>
+  <text x="478" y="501" class="body">Identity + presence</text>
+  <text x="478" y="543" class="body">Rules + prerequisites</text>
+  <text x="478" y="585" class="body">Retry + result</text>
+  <text x="478" y="635" class="detail">Settle once</text>
 
-  <rect x="430" y="125" width="340" height="312" rx="12" fill="#172b31" stroke="#79bfcd" stroke-width="1.5"/>
-  <text x="455" y="157" class="label">WORLD AUTHORITY</text>
-  <text x="455" y="191" class="heading">Convex runtime</text>
-  <path d="M455 212 H745" class="rule"/>
-  <text x="455" y="247" class="body">01  Bind identity and scope</text>
-  <text x="455" y="286" class="body">02  Check current world rules</text>
-  <text x="455" y="325" class="body">03  Settle the action once</text>
-  <path d="M455 350 H745" class="rule"/>
-  <text x="455" y="382" class="note">Presence · capability · prerequisites</text>
-  <text x="455" y="405" class="note">Risk · retry identity · consequences</text>
+  <rect x="866" y="294" width="310" height="370" rx="18" class="card"/>
+  <text x="894" y="334" class="stage">03 / PERSIST</text>
+  <text x="894" y="391" class="heading">World facts</text>
+  <text x="894" y="429" class="caption">Durable state</text>
+  <path d="M894 458 H1148" class="divider"/>
+  <text x="894" y="501" class="body">Profiles + inventory</text>
+  <text x="894" y="543" class="body">Relations + memory</text>
+  <text x="894" y="585" class="body">Actions + events</text>
+  <text x="894" y="635" class="detail">Linked evidence</text>
 
-  <rect x="860" y="125" width="300" height="312" rx="12" class="box"/>
-  <text x="884" y="157" class="label">DURABLE FACTS</text>
-  <text x="884" y="191" class="heading">World state + history</text>
-  <path d="M884 212 H1136" class="rule"/>
-  <text x="884" y="252" class="body">Profiles and inventories</text>
-  <text x="884" y="291" class="body">Relationships and memories</text>
-  <text x="884" y="330" class="body">Action records and events</text>
-  <text x="884" y="396" class="note">Changes retain linked evidence.</text>
+  <rect x="1260" y="294" width="276" height="370" rx="18" class="card"/>
+  <text x="1288" y="334" class="stage">04 / PROJECT</text>
+  <text x="1288" y="391" class="heading">Read model</text>
+  <text x="1288" y="429" class="caption">Scoped readback</text>
+  <path d="M1288 458 H1508" class="divider"/>
+  <text x="1288" y="501" class="body">State + results</text>
+  <text x="1288" y="543" class="body">Display fields</text>
+  <text x="1288" y="585" class="body">History + replay</text>
+  <text x="1288" y="635" class="detail">Read-only projection</text>
 
-  <rect x="430" y="505" width="730" height="105" rx="12" class="box"/>
-  <text x="455" y="538" class="label">READ MODELS + HISTORY</text>
-  <text x="455" y="577" class="body">Viewer-safe state · action results · presentation · replay</text>
-
-  <path d="M340 191 H430" class="flow"/>
-  <path d="M340 371 H430" class="flow"/>
-  <path d="M770 281 H860" class="flow"/>
-  <path d="M1010 437 V505" class="flow"/>
-  <path d="M430 557 H20 V191 H40" fill="none" stroke="#79bfcd" stroke-width="2" marker-end="url(#readArrow)"/>
-  <text x="59" y="521" class="note">State and results return</text>
-  <text x="59" y="544" class="note">to the client.</text>
-  <text x="40" y="643" class="note">Life and player dialogue currently run in separate labs. See the architecture guide for their integration paths.</text>
+  <path d="M364 484 H450" class="flow"/>
+  <path d="M780 484 H866" class="flow"/>
+  <path d="M1176 484 H1260" class="flow"/>
+  <path d="M1398 664 V722 Q1398 742 1378 742 H234 Q214 742 214 722 V664" class="flow"/>
+  <rect x="548" y="725" width="504" height="34" fill="#f5f2e9"/>
+  <text x="800" y="751" text-anchor="middle" class="subtitle">Observe again. Choose the next action.</text>
+  <path d="M64 812 H1536" stroke="#d2d9ca" stroke-width="1.5"/>
+  <text x="64" y="854" class="note">Implemented runtime</text>
+  <text x="1536" y="854" text-anchor="end" class="note">Life, dialogue, and planned shared-world flows: ARCHITECTURE.md</text>
 </svg>
